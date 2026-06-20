@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import "./styles.css";
 import { traceCircleTargets, type AttackRequest } from "./combat";
-import { AMMO_CONFIG, COLORS, DEFAULT_WEAPON, ENEMY_CONFIG, GAME, MAP, getSpawnStage, type EnemyKind } from "./config";
+import { AMMO_CONFIG, BULLET_VISUAL, COLORS, DEFAULT_WEAPON, ENEMY_CONFIG, GAME, MAP, getSpawnStage, type EnemyKind } from "./config";
 import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
 import { WeaponSystem } from "./weapon";
@@ -35,6 +35,13 @@ type ShotEffect = {
   maxLife: number;
 };
 
+type BulletVisual = {
+  group: THREE.Group;
+  direction: THREE.Vector3;
+  remainingDistance: number;
+  impact?: { x: number; z: number; color: number };
+};
+
 type AmmoPickup = {
   group: THREE.Group;
   amount: number;
@@ -62,6 +69,7 @@ class OfficeEscapeGame {
   private enemies: Enemy[] = [];
   private particles: Particle[] = [];
   private shotEffects: ShotEffect[] = [];
+  private bulletVisuals: BulletVisual[] = [];
   private ammoPickups: AmmoPickup[] = [];
   private accessCard?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
@@ -376,6 +384,7 @@ class OfficeEscapeGame {
 
   private update(delta: number) {
     if (this.gameOver) {
+      this.updateBulletVisuals(delta);
       this.updateParticles(delta);
       this.updateShotEffects(delta);
       return;
@@ -388,6 +397,7 @@ class OfficeEscapeGame {
     const input = this.input!.getState(this.playerState.x, this.playerState.z);
     this.updateTimeline();
     this.updatePlayer(delta, input);
+    this.updateBulletVisuals(delta);
     this.updateEnemies(delta);
     this.updateWeapon(input);
     this.updateAmmoPickups(delta);
@@ -661,8 +671,12 @@ class OfficeEscapeGame {
   }
 
   private removeAmmoPickup(pickup: AmmoPickup) {
-    this.scene.remove(pickup.group);
-    pickup.group.traverse((object) => {
+    this.disposeObject(pickup.group);
+  }
+
+  private disposeObject(root: THREE.Object3D) {
+    this.scene.remove(root);
+    root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
       const materials = Array.isArray(object.material) ? object.material : [object.material];
@@ -717,25 +731,84 @@ class OfficeEscapeGame {
       window.setTimeout(() => {
         if (hit.target.hp > 0) hit.target.group.scale.setScalar(1);
       }, 65);
-      this.emitParticles(hit.x, 34, hit.z, ENEMY_CONFIG[hit.target.kind].color, 4, 38);
     }
 
     const endX = request.originX + request.directionX * trace.endDistance;
     const endZ = request.originZ + request.directionZ * trace.endDistance;
-    this.createShotTrace(request.originX, request.originZ, endX, endZ);
+    const lastHit = trace.hits.at(-1);
+    const impact = lastHit
+      ? { x: lastHit.x, z: lastHit.z, color: ENEMY_CONFIG[lastHit.target.kind].color }
+      : obstacleDistance < request.range
+        ? { x: endX, z: endZ, color: 0xd8d4c8 }
+        : undefined;
+    this.createBulletVisual(request.originX, request.originZ, endX, endZ, impact);
     this.createMuzzleFlash(request.originX, request.originZ);
     this.cameraKick = Math.min(7, this.cameraKick + 2.2);
   }
 
-  private createShotTrace(originX: number, originZ: number, endX: number, endZ: number) {
-    const geometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(originX, 39, originZ),
-      new THREE.Vector3(endX, 31, endZ),
-    ]);
-    const material = new THREE.LineBasicMaterial({ color: COLORS.muzzle, transparent: true, opacity: 0.95 });
-    const line = new THREE.Line(geometry, material);
-    this.scene.add(line);
-    this.shotEffects.push({ object: line, life: 0.065, maxLife: 0.065 });
+  private createBulletVisual(
+    originX: number,
+    originZ: number,
+    endX: number,
+    endZ: number,
+    impact?: BulletVisual["impact"],
+  ) {
+    if (this.bulletVisuals.length >= BULLET_VISUAL.maxActive) {
+      const oldest = this.bulletVisuals.shift();
+      if (oldest) this.disposeObject(oldest.group);
+    }
+
+    const direction = new THREE.Vector3(endX - originX, 0, endZ - originZ);
+    const distance = direction.length();
+    if (distance < 0.001) {
+      if (impact) this.emitParticles(impact.x, 32, impact.z, impact.color, 4, 34);
+      return;
+    }
+    direction.normalize();
+    const length = Math.max(8, Math.min(BULLET_VISUAL.length, distance * 0.72));
+    const group = new THREE.Group();
+    const glow = new THREE.Mesh(
+      new THREE.CapsuleGeometry(BULLET_VISUAL.radius, length, 4, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: 0.42, depthWrite: false }),
+    );
+    const core = new THREE.Mesh(
+      new THREE.CapsuleGeometry(BULLET_VISUAL.radius * 0.55, length * 0.62, 4, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0xffe7a3,
+        emissive: 0xffa000,
+        emissiveIntensity: 1.8,
+        metalness: 0.5,
+        roughness: 0.25,
+      }),
+    );
+    group.add(glow, core);
+    group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+    group.position.set(
+      originX + direction.x * (length / 2),
+      39,
+      originZ + direction.z * (length / 2),
+    );
+    this.scene.add(group);
+    this.bulletVisuals.push({
+      group,
+      direction,
+      remainingDistance: Math.max(0, distance - length),
+      impact,
+    });
+  }
+
+  private updateBulletVisuals(delta: number) {
+    const completed: BulletVisual[] = [];
+    for (const bullet of this.bulletVisuals) {
+      const distance = Math.min(bullet.remainingDistance, BULLET_VISUAL.speed * delta);
+      bullet.group.position.addScaledVector(bullet.direction, distance);
+      bullet.remainingDistance -= distance;
+      if (bullet.remainingDistance > 0.001) continue;
+      if (bullet.impact) this.emitParticles(bullet.impact.x, 32, bullet.impact.z, bullet.impact.color, 4, 34);
+      completed.push(bullet);
+    }
+    for (const bullet of completed) this.disposeObject(bullet.group);
+    if (completed.length > 0) this.bulletVisuals = this.bulletVisuals.filter((bullet) => !completed.includes(bullet));
   }
 
   private createMuzzleFlash(x: number, z: number) {
@@ -758,10 +831,7 @@ class OfficeEscapeGame {
     }
     const expired = this.shotEffects.filter((effect) => effect.life <= 0);
     for (const effect of expired) {
-      const object = effect.object as THREE.Mesh | THREE.Line;
-      object.geometry.dispose();
-      (object.material as THREE.Material).dispose();
-      this.scene.remove(effect.object);
+      this.disposeObject(effect.object);
     }
     this.shotEffects = this.shotEffects.filter((effect) => effect.life > 0);
   }

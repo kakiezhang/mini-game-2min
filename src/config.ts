@@ -110,6 +110,13 @@ export const DEFAULT_WEAPON: WeaponConfig = {
   reloadTime: 1.3,
 };
 
+export const BULLET_VISUAL = {
+  speed: 1800,
+  length: 36,
+  radius: 4.5,
+  maxActive: 24,
+};
+
 export const AMMO_CONFIG = {
   fixedAmount: 40,
   droppedAmount: 12,
