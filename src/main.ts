@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import "./styles.css";
+import { NavigationWorld, type Obstacle } from "./navigation";
 
 const MAP = {
   width: 1080,
@@ -8,7 +9,7 @@ const MAP = {
 
 const GAME = {
   duration: 120,
-  maxEnemies: 105,
+  maxEnemies: 55,
   playerRadius: 20,
   elevatorHoldTime: 2,
 };
@@ -119,6 +120,7 @@ class OfficeEscapeGame {
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 5000);
   private readonly clock = new THREE.Clock();
   private readonly keys = new Set<string>();
+  private readonly navigation = new NavigationWorld(MAP.width, MAP.depth);
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
@@ -127,6 +129,8 @@ class OfficeEscapeGame {
   private particles: Particle[] = [];
   private accessCard?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
+  private elevatorDoors: THREE.Mesh[] = [];
+  private elevatorDoorObstacle?: Obstacle;
   private nextEnemyId = 1;
   private spawnTimer = 0;
   private elapsed = 0;
@@ -237,10 +241,16 @@ class OfficeEscapeGame {
     this.addWall(MAP.width / 2, MAP.depth, MAP.width, 22);
     this.addWall(0, MAP.depth / 2, 22, MAP.depth);
     this.addWall(MAP.width, MAP.depth / 2, 22, MAP.depth);
-    this.addWall(540, 560, 1040, 24);
-    this.addWall(540, 1120, 1040, 24);
-    this.addWall(540, 280, 24, 520);
-    this.addWall(540, 840, 24, 520);
+    // Internal walls are segmented to leave visible, playable doorways between rooms.
+    this.addWall(115, 560, 190, 24);
+    this.addWall(535, 560, 370, 24);
+    this.addWall(970, 560, 180, 24);
+    this.addWall(235, 1120, 430, 24);
+    this.addWall(845, 1120, 430, 24);
+    this.addWall(540, 115, 24, 190);
+    this.addWall(540, 449, 24, 198);
+    this.addWall(540, 681, 24, 218);
+    this.addWall(540, 1019, 24, 178);
 
     this.addDesk(250, 770, 270, 70, 42, 0x8a623a);
     this.addDesk(260, 925, 240, 70, 42, 0x8a623a);
@@ -258,6 +268,7 @@ class OfficeEscapeGame {
     wall.castShadow = true;
     wall.receiveShadow = true;
     this.scene.add(wall);
+    this.navigation.addObstacle(x, z, width, depth);
   }
 
   private addDesk(x: number, z: number, width: number, depth: number, height: number, color: number) {
@@ -266,6 +277,7 @@ class OfficeEscapeGame {
     top.castShadow = true;
     top.receiveShadow = true;
     this.scene.add(top);
+    this.navigation.addObstacle(x, z, width, depth);
 
     const highlight = this.box(width * 0.44, 3, depth * 0.12, 0xffffff, 0.18);
     highlight.position.set(x - width * 0.18, height + 2, z - depth * 0.22);
@@ -280,11 +292,23 @@ class OfficeEscapeGame {
   }
 
   private addElevatorDoor() {
-    const frame = this.box(320, 92, 28, COLORS.elevatorClosed, 1);
-    frame.position.set(540, 46, 1295);
-    frame.castShadow = true;
-    frame.receiveShadow = true;
-    this.scene.add(frame);
+    this.addWall(398, 1295, 36, 28);
+    this.addWall(682, 1295, 36, 28);
+    this.addWall(380, 1425, 24, 260);
+    this.addWall(700, 1425, 24, 260);
+    this.addWall(540, 1555, 344, 24);
+
+    const lintel = this.box(320, 24, 28, COLORS.elevatorClosed, 1);
+    lintel.position.set(540, 80, 1295);
+    this.scene.add(lintel);
+
+    const leftDoor = this.box(124, 68, 18, COLORS.elevatorClosed, 1);
+    const rightDoor = this.box(124, 68, 18, COLORS.elevatorClosed, 1);
+    leftDoor.position.set(478, 34, 1295);
+    rightDoor.position.set(602, 34, 1295);
+    this.elevatorDoors = [leftDoor, rightDoor];
+    this.scene.add(leftDoor, rightDoor);
+    this.elevatorDoorObstacle = this.navigation.addObstacle(540, 1295, 248, 22);
 
     this.elevatorZone = this.box(300, 3, 180, COLORS.elevatorClosed, 0.36);
     this.elevatorZone.position.set(540, 3, 1440);
@@ -311,6 +335,7 @@ class OfficeEscapeGame {
       chair.castShadow = true;
       chair.receiveShadow = true;
       this.scene.add(chair);
+      this.navigation.addObstacle(x, z, 34, 34);
     }
   }
 
@@ -439,8 +464,15 @@ class OfficeEscapeGame {
     const input = this.getInput();
     const slowMultiplier = this.elapsed < this.slowUntil ? 0.7 : 1;
     const speed = this.playerState.speed * slowMultiplier;
-    this.playerState.x = THREE.MathUtils.clamp(this.playerState.x + input.moveX * speed * delta, 30, MAP.width - 30);
-    this.playerState.z = THREE.MathUtils.clamp(this.playerState.z + input.moveZ * speed * delta, 30, MAP.depth - 30);
+    const nextPosition = this.navigation.moveCircle(
+      this.playerState.x,
+      this.playerState.z,
+      input.moveX * speed * delta,
+      input.moveZ * speed * delta,
+      GAME.playerRadius,
+    );
+    this.playerState.x = nextPosition.x;
+    this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.player.rotation.y = Math.atan2(input.moveX, input.moveZ || 0.001);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
@@ -476,6 +508,10 @@ class OfficeEscapeGame {
     }
     if (!this.elevatorOpen && this.elapsed >= 80) {
       this.elevatorOpen = true;
+      this.navigation.setObstacleActive(this.elevatorDoorObstacle, false);
+      this.elevatorDoors[0].position.x = 416;
+      this.elevatorDoors[1].position.x = 664;
+      for (const door of this.elevatorDoors) this.setMeshColor(door, COLORS.elevatorOpen);
       this.setMeshColor(this.elevatorZone, COLORS.elevatorOpen, 0.5);
       this.showHint("电梯开放！快去下班！");
     }
@@ -489,16 +525,19 @@ class OfficeEscapeGame {
   private trySpawnEnemies() {
     if (this.enemies.length >= GAME.maxEnemies || this.spawnTimer > 0) return;
     const stage = this.getSpawnStage();
-    for (let i = 0; i < stage.count; i += 1) this.spawnEnemy(this.pickEnemyKind(stage.weights));
+    const reservedBossSlots = this.bossSpawned ? 0 : 1;
+    const availableSlots = Math.max(0, GAME.maxEnemies - this.enemies.length - reservedBossSlots);
+    const spawnCount = Math.min(stage.count, availableSlots);
+    for (let i = 0; i < spawnCount; i += 1) this.spawnEnemy(this.pickEnemyKind(stage.weights));
     this.spawnTimer = stage.interval;
   }
 
   private getSpawnStage() {
     if (this.elapsed < 15) return { interval: 1.15, count: 2, weights: { bug: 100, changeRequest: 0, meeting: 0 } };
-    if (this.elapsed < 40) return { interval: 1.0, count: 3, weights: { bug: 75, changeRequest: 25, meeting: 0 } };
-    if (this.elapsed < 80) return { interval: 0.9, count: 3, weights: { bug: 55, changeRequest: 30, meeting: 15 } };
-    if (this.elapsed < 90) return { interval: 0.8, count: 4, weights: { bug: 45, changeRequest: 35, meeting: 20 } };
-    return { interval: 0.7, count: 4, weights: { bug: 40, changeRequest: 40, meeting: 20 } };
+    if (this.elapsed < 40) return { interval: 1.0, count: 2, weights: { bug: 75, changeRequest: 25, meeting: 0 } };
+    if (this.elapsed < 80) return { interval: 0.9, count: 2, weights: { bug: 55, changeRequest: 30, meeting: 15 } };
+    if (this.elapsed < 90) return { interval: 0.8, count: 3, weights: { bug: 45, changeRequest: 35, meeting: 20 } };
+    return { interval: 0.7, count: 3, weights: { bug: 40, changeRequest: 40, meeting: 20 } };
   }
 
   private pickEnemyKind(weights: Record<Exclude<EnemyKind, "boss">, number>): Exclude<EnemyKind, "boss"> {
@@ -510,28 +549,31 @@ class OfficeEscapeGame {
   }
 
   private spawnEnemy(kind: Exclude<EnemyKind, "boss">) {
-    const side = Math.floor(Math.random() * 4);
     const margin = 42;
-    let x = margin;
-    let z = margin;
-    if (side === 0) {
-      x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
-      z = margin;
-    } else if (side === 1) {
-      x = MAP.width - margin;
-      z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
-    } else if (side === 2) {
-      x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
-      z = MAP.depth - margin;
-    } else {
-      x = margin;
-      z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
+    const radius = ENEMY_CONFIG[kind].radius;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const side = Math.floor(Math.random() * 4);
+      let x = margin;
+      let z = margin;
+      if (side === 0) {
+        x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
+      } else if (side === 1) {
+        x = MAP.width - margin;
+        z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
+      } else if (side === 2) {
+        x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
+        z = MAP.depth - margin;
+      } else {
+        z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
+      }
+      if (this.distanceToPlayer(x, z) < 300 || !this.navigation.canOccupy(x, z, radius)) continue;
+      this.createEnemy(kind, x, z);
+      return;
     }
-    this.createEnemy(kind, x, z);
   }
 
   private spawnBoss() {
-    this.createEnemy("boss", 810, 280);
+    this.createEnemy("boss", 820, 430);
   }
 
   private createEnemy(kind: EnemyKind, x: number, z: number) {
@@ -576,14 +618,13 @@ class OfficeEscapeGame {
 
   private updateEnemies(delta: number) {
     for (const enemy of this.enemies) {
+      const playerDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
       const orbitAngle = enemy.surroundAngle + this.elapsed * 0.18;
-      const targetX = this.playerState.x + Math.cos(orbitAngle) * enemy.surroundRadius;
-      const targetZ = this.playerState.z + Math.sin(orbitAngle) * enemy.surroundRadius;
-      let moveX = targetX - enemy.group.position.x;
-      let moveZ = targetZ - enemy.group.position.z;
-      const chaseDistance = Math.max(Math.hypot(moveX, moveZ), 0.001);
-      moveX /= chaseDistance;
-      moveZ /= chaseDistance;
+      const targetX = playerDistance < 210 ? this.playerState.x + Math.cos(orbitAngle) * enemy.surroundRadius : this.playerState.x;
+      const targetZ = playerDistance < 210 ? this.playerState.z + Math.sin(orbitAngle) * enemy.surroundRadius : this.playerState.z;
+      const direction = this.navigation.getDirection(enemy.group.position.x, enemy.group.position.z, targetX, targetZ, enemy.radius);
+      let moveX = direction.x;
+      let moveZ = direction.z;
 
       if (enemy.kind !== "boss") {
         const separation = this.getEnemySeparation(enemy);
@@ -592,12 +633,19 @@ class OfficeEscapeGame {
       }
 
       const length = Math.max(Math.hypot(moveX, moveZ), 0.001);
-      enemy.group.position.x += (moveX / length) * enemy.speed * delta;
-      enemy.group.position.z += (moveZ / length) * enemy.speed * delta;
+      const nextPosition = this.navigation.moveCircle(
+        enemy.group.position.x,
+        enemy.group.position.z,
+        (moveX / length) * enemy.speed * delta,
+        (moveZ / length) * enemy.speed * delta,
+        enemy.radius,
+      );
+      enemy.group.position.x = nextPosition.x;
+      enemy.group.position.z = nextPosition.z;
       enemy.group.rotation.y = Math.atan2(moveX, moveZ);
 
-      const playerDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
-      if (playerDistance < GAME.playerRadius + enemy.radius && this.elapsed >= enemy.nextHitAt) {
+      const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
+      if (contactDistance < GAME.playerRadius + enemy.radius && this.elapsed >= enemy.nextHitAt) {
         enemy.nextHitAt = this.elapsed + enemy.contactCooldown;
         this.playerState.hp = Math.max(0, this.playerState.hp - enemy.damage);
         this.emitParticles(this.playerState.x, 26, this.playerState.z, 0xff6b6b, 5, 48);
@@ -685,7 +733,7 @@ class OfficeEscapeGame {
     const glow = new THREE.PointLight(COLORS.accessCard, 0.85, 210, 1.6);
     glow.position.y = 44;
     this.accessCard.add(card, glow);
-    this.accessCard.position.set(270, 0, 280);
+    this.accessCard.position.set(270, 0, 400);
     this.scene.add(this.accessCard);
   }
 
