@@ -344,6 +344,29 @@ canvas {
   background: #ffd166;
 }
 
+.reload-button {
+  position: absolute;
+  right: max(45px, calc(env(safe-area-inset-right) + 23px));
+  bottom: max(145px, calc(env(safe-area-inset-bottom) + 117px));
+  display: none;
+  width: 58px;
+  height: 58px;
+  padding: 0;
+  border: 2px solid rgba(125, 211, 252, 0.8);
+  border-radius: 50%;
+  background: rgba(13, 19, 17, 0.72);
+  color: #d9f4ff;
+  font-size: 24px;
+  font-weight: 900;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.reload-button.is-active {
+  background: rgba(24, 83, 110, 0.86);
+  transform: scale(0.95);
+}
+
 .fire-icon::after {
   width: 4px;
   height: 64px;
@@ -426,23 +449,25 @@ canvas {
 
   .weapon-panel {
     right: max(14px, env(safe-area-inset-right));
-    bottom: max(150px, calc(env(safe-area-inset-bottom) + 132px));
+    bottom: max(220px, calc(env(safe-area-inset-bottom) + 192px));
     width: 146px;
   }
 
-  .fire-button {
+  .fire-button,
+  .reload-button {
     display: block;
   }
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .fire-button {
+  .fire-button,
+  .reload-button {
     display: block;
   }
 
   .weapon-panel {
     right: max(14px, env(safe-area-inset-right));
-    bottom: max(150px, calc(env(safe-area-inset-bottom) + 132px));
+    bottom: max(220px, calc(env(safe-area-inset-bottom) + 192px));
     width: 146px;
   }
 }

@@ -11,6 +11,7 @@ export type WeaponSnapshot = {
   magazineAmmo: number;
   magazineSize: number;
   reserveAmmo: number;
+  reserveAmmoMax: number;
   isReloading: boolean;
   reloadProgress: number;
 };
@@ -62,9 +63,16 @@ export class WeaponSystem {
       magazineAmmo: this.magazineAmmo,
       magazineSize: this.config.magazineSize,
       reserveAmmo: this.reserveAmmo,
+      reserveAmmoMax: this.config.maxReserveAmmo,
       isReloading: this.isReloading,
       reloadProgress,
     };
+  }
+
+  addReserveAmmo(amount: number) {
+    const previousAmmo = this.reserveAmmo;
+    this.reserveAmmo = Math.min(this.config.maxReserveAmmo, this.reserveAmmo + Math.max(0, amount));
+    return this.reserveAmmo - previousAmmo;
   }
 
   private startReload(elapsed: number) {

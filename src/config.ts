@@ -17,6 +17,8 @@ export const COLORS = {
   playerAccent: 0x2fbf71,
   weapon: 0x303941,
   muzzle: 0xffd166,
+  ammoBox: 0x32d583,
+  ammoPack: 0x7dd3fc,
   bug: 0xff6f61,
   changeRequest: 0x60a5fa,
   meeting: 0xa78bfa,
@@ -106,6 +108,24 @@ export const DEFAULT_WEAPON: WeaponConfig = {
   initialReserveAmmo: 80,
   maxReserveAmmo: 120,
   reloadTime: 1.3,
+};
+
+export const AMMO_CONFIG = {
+  fixedAmount: 40,
+  droppedAmount: 12,
+  fixedRespawnTime: 20,
+  droppedLifetime: 24,
+  maxDroppedPacks: 20,
+  dropChance: {
+    bug: 0.12,
+    changeRequest: 0.2,
+    meeting: 0.25,
+    boss: 0,
+  } satisfies Record<EnemyKind, number>,
+  fixedSpawns: [
+    { id: "workstation", x: 450, z: 1000 },
+    { id: "bossOffice", x: 950, z: 450 },
+  ],
 };
 
 export const getSpawnStage = (elapsed: number) => {

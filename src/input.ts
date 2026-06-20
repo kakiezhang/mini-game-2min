@@ -40,6 +40,7 @@ export class InputController {
     private readonly camera: THREE.Camera,
     private readonly joystick: JoystickElements,
     private readonly fireButton: HTMLElement,
+    private readonly reloadButton: HTMLElement,
   ) {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
@@ -56,6 +57,9 @@ export class InputController {
     fireButton.addEventListener("pointerdown", this.onFireButtonDown);
     fireButton.addEventListener("pointerup", this.onFireButtonUp);
     fireButton.addEventListener("pointercancel", this.onFireButtonUp);
+    reloadButton.addEventListener("pointerdown", this.onReloadButtonDown);
+    reloadButton.addEventListener("pointerup", this.onReloadButtonUp);
+    reloadButton.addEventListener("pointercancel", this.onReloadButtonUp);
   }
 
   getState(playerX: number, playerZ: number): InputState {
@@ -123,6 +127,7 @@ export class InputController {
     this.keys.clear();
     this.fireHeld = false;
     this.fireButton.classList.remove("is-active");
+    this.reloadButton.classList.remove("is-active");
     this.releaseJoystick();
   };
 
@@ -156,6 +161,17 @@ export class InputController {
   private onFireButtonUp = () => {
     this.fireHeld = false;
     this.fireButton.classList.remove("is-active");
+  };
+
+  private onReloadButtonDown = (event: PointerEvent) => {
+    event.preventDefault();
+    this.reloadButton.setPointerCapture(event.pointerId);
+    this.reloadQueued = true;
+    this.reloadButton.classList.add("is-active");
+  };
+
+  private onReloadButtonUp = () => {
+    this.reloadButton.classList.remove("is-active");
   };
 
   private onJoystickDown = (event: PointerEvent) => {
