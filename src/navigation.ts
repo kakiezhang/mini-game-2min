@@ -59,6 +59,16 @@ export class NavigationWorld {
     return !this.isCircleBlocked(x, z, radius);
   }
 
+  raycastObstacleDistance(x: number, z: number, directionX: number, directionZ: number, maxDistance: number) {
+    let nearestDistance = maxDistance;
+    for (const obstacle of this.obstacles) {
+      if (!obstacle.active) continue;
+      const distance = this.rayRectangleDistance(x, z, directionX, directionZ, obstacle);
+      if (distance !== undefined && distance < nearestDistance) nearestDistance = distance;
+    }
+    return nearestDistance;
+  }
+
   moveCircle(x: number, z: number, deltaX: number, deltaZ: number, radius: number): Point {
     const nextX = Math.max(radius, Math.min(this.width - radius, x + deltaX));
     if (!this.isCircleBlocked(nextX, z, radius)) x = nextX;
@@ -112,6 +122,27 @@ export class NavigationWorld {
       if (deltaX * deltaX + deltaZ * deltaZ < radius * radius) return true;
     }
     return false;
+  }
+
+  private rayRectangleDistance(x: number, z: number, directionX: number, directionZ: number, obstacle: Obstacle) {
+    const minX = obstacle.x - obstacle.width / 2;
+    const maxX = obstacle.x + obstacle.width / 2;
+    const minZ = obstacle.z - obstacle.depth / 2;
+    const maxZ = obstacle.z + obstacle.depth / 2;
+    let entry = 0;
+    let exit = Number.POSITIVE_INFINITY;
+
+    const updateRange = (origin: number, direction: number, min: number, max: number) => {
+      if (Math.abs(direction) < 0.000001) return origin >= min && origin <= max;
+      const first = (min - origin) / direction;
+      const second = (max - origin) / direction;
+      entry = Math.max(entry, Math.min(first, second));
+      exit = Math.min(exit, Math.max(first, second));
+      return entry <= exit;
+    };
+
+    if (!updateRange(x, directionX, minX, maxX) || !updateRange(z, directionZ, minZ, maxZ)) return undefined;
+    return exit >= 0 ? Math.max(0, entry) : undefined;
   }
 
   private hasClearPath(x: number, z: number, targetX: number, targetZ: number, radius: number) {

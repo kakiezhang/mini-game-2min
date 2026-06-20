@@ -1,46 +1,10 @@
 import * as THREE from "three";
 import "./styles.css";
+import { traceCircleTargets, type AttackRequest } from "./combat";
+import { COLORS, DEFAULT_WEAPON, ENEMY_CONFIG, GAME, MAP, getSpawnStage, type EnemyKind } from "./config";
+import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
-
-const MAP = {
-  width: 1080,
-  depth: 1720,
-};
-
-const GAME = {
-  duration: 120,
-  maxEnemies: 55,
-  playerRadius: 20,
-  elevatorHoldTime: 2,
-};
-
-const COLORS = {
-  floor: 0x29322f,
-  wall: 0x8a938a,
-  player: 0xf4f0da,
-  playerAccent: 0x2fbf71,
-  bug: 0xff6f61,
-  changeRequest: 0x60a5fa,
-  meeting: 0xa78bfa,
-  boss: 0xb45309,
-  dart: 0xffd166,
-  accessCard: 0xfacc15,
-  elevatorClosed: 0x737b86,
-  elevatorOpen: 0x22c55e,
-};
-
-type EnemyKind = "bug" | "changeRequest" | "meeting" | "boss";
-
-type EnemyConfig = {
-  color: number;
-  radius: number;
-  height: number;
-  hp: number;
-  speed: number;
-  damage: number;
-  expReward: number;
-  contactCooldown: number;
-};
+import { WeaponSystem } from "./weapon";
 
 type Enemy = {
   id: number;
@@ -65,52 +29,10 @@ type Particle = {
   maxLife: number;
 };
 
-type InputState = {
-  moveX: number;
-  moveZ: number;
-};
-
-const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
-  bug: {
-    color: COLORS.bug,
-    radius: 15,
-    height: 34,
-    hp: 12,
-    speed: 70,
-    damage: 5,
-    expReward: 5,
-    contactCooldown: 0.6,
-  },
-  changeRequest: {
-    color: COLORS.changeRequest,
-    radius: 17,
-    height: 46,
-    hp: 28,
-    speed: 95,
-    damage: 8,
-    expReward: 10,
-    contactCooldown: 0.7,
-  },
-  meeting: {
-    color: COLORS.meeting,
-    radius: 18,
-    height: 40,
-    hp: 35,
-    speed: 60,
-    damage: 4,
-    expReward: 12,
-    contactCooldown: 0.8,
-  },
-  boss: {
-    color: COLORS.boss,
-    radius: 30,
-    height: 88,
-    hp: 2000,
-    speed: 115,
-    damage: 20,
-    expReward: 0,
-    contactCooldown: 0.75,
-  },
+type ShotEffect = {
+  object: THREE.Object3D;
+  life: number;
+  maxLife: number;
 };
 
 class OfficeEscapeGame {
@@ -119,14 +41,16 @@ class OfficeEscapeGame {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 5000);
   private readonly clock = new THREE.Clock();
-  private readonly keys = new Set<string>();
   private readonly navigation = new NavigationWorld(MAP.width, MAP.depth);
+  private readonly weapon = new WeaponSystem(DEFAULT_WEAPON);
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
-  private darts: THREE.Group[] = [];
+  private input?: InputController;
+  private crosshair?: THREE.Group;
   private enemies: Enemy[] = [];
   private particles: Particle[] = [];
+  private shotEffects: ShotEffect[] = [];
   private accessCard?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
   private elevatorDoors: THREE.Mesh[] = [];
@@ -144,6 +68,8 @@ class OfficeEscapeGame {
   private nextElevatorHintAt = 0;
   private slowUntil = 0;
   private lastHintTimer = 0;
+  private nextWeaponHintAt = 0;
+  private cameraKick = 0;
 
   private readonly playerState = {
     x: 270,
@@ -157,14 +83,6 @@ class OfficeEscapeGame {
   };
 
   private readonly hud = this.createHud();
-  private readonly joystick = {
-    active: false,
-    pointerId: -1,
-    centerX: 0,
-    centerY: 0,
-    x: 0,
-    z: 0,
-  };
 
   constructor() {
     this.app.innerHTML = "";
@@ -179,7 +97,11 @@ class OfficeEscapeGame {
     this.createLights();
     this.createMap();
     this.createPlayer();
-    this.createDarts();
+    this.createCrosshair();
+    this.input = new InputController(this.renderer.domElement, this.camera, {
+      base: this.hud.joystickBase,
+      knob: this.hud.joystickKnob,
+    }, this.hud.fireButton);
     this.bindEvents();
     this.showHint("距离下班还有 120 秒");
     this.resize();
@@ -357,8 +279,12 @@ class OfficeEscapeGame {
     const head = this.mesh(new THREE.SphereGeometry(15, 12, 10), 0xf2c9a8);
     head.position.y = 62;
     const bag = this.mesh(new THREE.BoxGeometry(28, 18, 16), COLORS.playerAccent);
-    bag.position.set(0, 26, 19);
-    this.player.add(body, head, bag);
+    bag.position.set(-2, 26, -16);
+    const weaponBody = this.mesh(new THREE.BoxGeometry(11, 11, 42), COLORS.weapon);
+    weaponBody.position.set(13, 39, 25);
+    const weaponStock = this.mesh(new THREE.BoxGeometry(9, 16, 18), 0x59636b);
+    weaponStock.position.set(13, 36, 2);
+    this.player.add(body, head, bag, weaponBody, weaponStock);
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.scene.add(this.player);
 
@@ -367,63 +293,23 @@ class OfficeEscapeGame {
     this.scene.add(this.playerLight);
   }
 
-  private createDarts() {
-    this.darts = [];
-    this.addDart();
-    this.addDart();
-  }
-
-  private addDart() {
-    const dart = new THREE.Group();
-    const cap = this.mesh(new THREE.BoxGeometry(28, 10, 22), COLORS.dart);
-    cap.castShadow = true;
-    dart.add(cap);
-    this.scene.add(dart);
-    this.darts.push(dart);
+  private createCrosshair() {
+    this.crosshair = new THREE.Group();
+    const material = new THREE.MeshBasicMaterial({ color: 0xffe082, depthTest: false, transparent: true, opacity: 0.9 });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(11, 14, 24), material);
+    ring.rotation.x = -Math.PI / 2;
+    const horizontal = new THREE.Mesh(new THREE.BoxGeometry(38, 1, 3), material);
+    horizontal.position.y = 1;
+    const vertical = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 38), material);
+    vertical.position.y = 1;
+    this.crosshair.add(ring, horizontal, vertical);
+    this.crosshair.position.set(this.playerState.x, 5, this.playerState.z - 360);
+    this.crosshair.renderOrder = 20;
+    this.scene.add(this.crosshair);
   }
 
   private bindEvents() {
     window.addEventListener("resize", () => this.resize());
-    window.addEventListener("keydown", (event) => {
-      this.keys.add(event.code);
-      if (event.code === "KeyR") window.location.reload();
-    });
-    window.addEventListener("keyup", (event) => this.keys.delete(event.code));
-
-    const base = this.hud.joystickBase;
-    const knob = this.hud.joystickKnob;
-    base.addEventListener("pointerdown", (event) => {
-      this.joystick.active = true;
-      this.joystick.pointerId = event.pointerId;
-      const rect = base.getBoundingClientRect();
-      this.joystick.centerX = rect.left + rect.width / 2;
-      this.joystick.centerY = rect.top + rect.height / 2;
-      base.setPointerCapture(event.pointerId);
-      this.updateJoystick(event.clientX, event.clientY);
-    });
-    base.addEventListener("pointermove", (event) => {
-      if (!this.joystick.active || this.joystick.pointerId !== event.pointerId) return;
-      this.updateJoystick(event.clientX, event.clientY);
-    });
-    const release = () => {
-      this.joystick.active = false;
-      this.joystick.x = 0;
-      this.joystick.z = 0;
-      knob.style.transform = "translate(-50%, -50%)";
-    };
-    base.addEventListener("pointerup", release);
-    base.addEventListener("pointercancel", release);
-  }
-
-  private updateJoystick(clientX: number, clientY: number) {
-    const maxDistance = 58;
-    const dx = clientX - this.joystick.centerX;
-    const dy = clientY - this.joystick.centerY;
-    const distance = Math.min(Math.hypot(dx, dy), maxDistance);
-    const angle = Math.atan2(dy, dx);
-    this.joystick.x = (Math.cos(angle) * distance) / maxDistance;
-    this.joystick.z = (Math.sin(angle) * distance) / maxDistance;
-    this.hud.joystickKnob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
   }
 
   private animate = () => {
@@ -436,6 +322,7 @@ class OfficeEscapeGame {
   private update(delta: number) {
     if (this.gameOver) {
       this.updateParticles(delta);
+      this.updateShotEffects(delta);
       return;
     }
 
@@ -443,13 +330,15 @@ class OfficeEscapeGame {
     this.spawnTimer -= delta;
     this.lastHintTimer -= delta;
 
+    const input = this.input!.getState(this.playerState.x, this.playerState.z);
     this.updateTimeline();
-    this.updatePlayer(delta);
+    this.updatePlayer(delta, input);
     this.updateEnemies(delta);
-    this.updateDarts(delta);
+    this.updateWeapon(input);
     this.updateAccessCard();
     this.updateEvacuation(delta);
     this.updateParticles(delta);
+    this.updateShotEffects(delta);
     this.trySpawnEnemies();
     this.updateCamera(delta);
     this.updateObjectiveArrow();
@@ -460,8 +349,7 @@ class OfficeEscapeGame {
     else if (this.elapsed >= GAME.duration) this.finish("你被迫加班了", "#f97316");
   }
 
-  private updatePlayer(delta: number) {
-    const input = this.getInput();
+  private updatePlayer(delta: number, input: InputState) {
     const slowMultiplier = this.elapsed < this.slowUntil ? 0.7 : 1;
     const speed = this.playerState.speed * slowMultiplier;
     const nextPosition = this.navigation.moveCircle(
@@ -474,26 +362,9 @@ class OfficeEscapeGame {
     this.playerState.x = nextPosition.x;
     this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
-    this.player.rotation.y = Math.atan2(input.moveX, input.moveZ || 0.001);
+    this.player.rotation.y = Math.atan2(input.aimX, input.aimZ);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
-  }
-
-  private getInput(): InputState {
-    let moveX = 0;
-    let moveZ = 0;
-    if (this.keys.has("KeyA") || this.keys.has("ArrowLeft")) moveX -= 1;
-    if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) moveX += 1;
-    if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) moveZ -= 1;
-    if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) moveZ += 1;
-    moveX += this.joystick.x;
-    moveZ += this.joystick.z;
-
-    const length = Math.hypot(moveX, moveZ);
-    if (length > 0.001) {
-      moveX /= length;
-      moveZ /= length;
-    }
-    return { moveX, moveZ };
+    this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
   }
 
   private updateTimeline() {
@@ -524,20 +395,12 @@ class OfficeEscapeGame {
 
   private trySpawnEnemies() {
     if (this.enemies.length >= GAME.maxEnemies || this.spawnTimer > 0) return;
-    const stage = this.getSpawnStage();
+    const stage = getSpawnStage(this.elapsed);
     const reservedBossSlots = this.bossSpawned ? 0 : 1;
     const availableSlots = Math.max(0, GAME.maxEnemies - this.enemies.length - reservedBossSlots);
     const spawnCount = Math.min(stage.count, availableSlots);
     for (let i = 0; i < spawnCount; i += 1) this.spawnEnemy(this.pickEnemyKind(stage.weights));
     this.spawnTimer = stage.interval;
-  }
-
-  private getSpawnStage() {
-    if (this.elapsed < 15) return { interval: 1.15, count: 2, weights: { bug: 100, changeRequest: 0, meeting: 0 } };
-    if (this.elapsed < 40) return { interval: 1.0, count: 2, weights: { bug: 75, changeRequest: 25, meeting: 0 } };
-    if (this.elapsed < 80) return { interval: 0.9, count: 2, weights: { bug: 55, changeRequest: 30, meeting: 15 } };
-    if (this.elapsed < 90) return { interval: 0.8, count: 3, weights: { bug: 45, changeRequest: 35, meeting: 20 } };
-    return { interval: 0.7, count: 3, weights: { bug: 40, changeRequest: 40, meeting: 20 } };
   }
 
   private pickEnemyKind(weights: Record<Exclude<EnemyKind, "boss">, number>): Exclude<EnemyKind, "boss"> {
@@ -676,29 +539,117 @@ class OfficeEscapeGame {
     return { x, z };
   }
 
-  private updateDarts(delta: number) {
-    const orbitRadius = 58 + Math.min(this.playerState.level - 1, 4) * 5;
-    const damage = 8 + Math.max(0, this.playerState.level - 1) * 2;
-    const angleBase = this.elapsed * 3.2;
+  private updateWeapon(input: InputState) {
+    const update = this.weapon.update(this.elapsed, input.fireHeld, input.reloadPressed);
+    if (update.fired) this.fireWeapon(input.aimX, input.aimZ);
+    if (update.reloadStarted && this.elapsed >= this.nextWeaponHintAt) {
+      this.nextWeaponHintAt = this.elapsed + 0.8;
+      this.showHint("换弹中");
+    }
+    if (update.dryFire && this.elapsed >= this.nextWeaponHintAt) {
+      this.nextWeaponHintAt = this.elapsed + 1.2;
+      this.showHint("没子弹了，去找弹药箱");
+    }
+    this.removeDeadEnemies();
+  }
 
-    this.darts.forEach((dart, index) => {
-      const angle = angleBase + (index * Math.PI * 2) / this.darts.length;
-      const x = this.playerState.x + Math.cos(angle) * orbitRadius;
-      const z = this.playerState.z + Math.sin(angle) * orbitRadius;
-      dart.position.set(x, 42, z);
-      dart.rotation.y += delta * 5;
-
-      for (const enemy of this.enemies) {
-        const distance = Math.hypot(x - enemy.group.position.x, z - enemy.group.position.z);
-        if (distance <= enemy.radius + 18) {
-          enemy.hp -= damage * delta * 4;
-          enemy.group.scale.setScalar(1.08);
-          setTimeout(() => enemy.group.scale.setScalar(1), 70);
-          if (Math.random() < 0.055) this.emitParticles(x, 36, z, ENEMY_CONFIG[enemy.kind].color, 3, 26);
-        }
-      }
+  private fireWeapon(directionX: number, directionZ: number) {
+    const originX = this.playerState.x + directionX * 34;
+    const originZ = this.playerState.z + directionZ * 34;
+    this.resolveAttack({
+      sourceId: "player",
+      weaponId: DEFAULT_WEAPON.id,
+      mode: DEFAULT_WEAPON.attackMode,
+      originX,
+      originZ,
+      directionX,
+      directionZ,
+      range: DEFAULT_WEAPON.range,
+      damage: DEFAULT_WEAPON.damage,
+      maxHits: 1,
     });
+  }
 
+  private resolveAttack(request: AttackRequest) {
+    const obstacleDistance = this.navigation.raycastObstacleDistance(
+      request.originX,
+      request.originZ,
+      request.directionX,
+      request.directionZ,
+      request.range,
+    );
+    const trace = traceCircleTargets(
+      request.originX,
+      request.originZ,
+      request.directionX,
+      request.directionZ,
+      request.range,
+      obstacleDistance,
+      this.enemies.filter((enemy) => enemy.hp > 0).map((enemy) => ({
+        target: enemy,
+        x: enemy.group.position.x,
+        z: enemy.group.position.z,
+        radius: enemy.radius,
+      })),
+      request.maxHits,
+    );
+
+    for (const hit of trace.hits) {
+      hit.target.hp -= request.damage;
+      hit.target.group.scale.setScalar(1.1);
+      window.setTimeout(() => {
+        if (hit.target.hp > 0) hit.target.group.scale.setScalar(1);
+      }, 65);
+      this.emitParticles(hit.x, 34, hit.z, ENEMY_CONFIG[hit.target.kind].color, 4, 38);
+    }
+
+    const endX = request.originX + request.directionX * trace.endDistance;
+    const endZ = request.originZ + request.directionZ * trace.endDistance;
+    this.createShotTrace(request.originX, request.originZ, endX, endZ);
+    this.createMuzzleFlash(request.originX, request.originZ);
+    this.cameraKick = Math.min(7, this.cameraKick + 2.2);
+  }
+
+  private createShotTrace(originX: number, originZ: number, endX: number, endZ: number) {
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(originX, 39, originZ),
+      new THREE.Vector3(endX, 31, endZ),
+    ]);
+    const material = new THREE.LineBasicMaterial({ color: COLORS.muzzle, transparent: true, opacity: 0.95 });
+    const line = new THREE.Line(geometry, material);
+    this.scene.add(line);
+    this.shotEffects.push({ object: line, life: 0.065, maxLife: 0.065 });
+  }
+
+  private createMuzzleFlash(x: number, z: number) {
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(7, 6, 4),
+      new THREE.MeshBasicMaterial({ color: COLORS.muzzle, transparent: true, opacity: 1 }),
+    );
+    flash.position.set(x, 39, z);
+    this.scene.add(flash);
+    this.shotEffects.push({ object: flash, life: 0.05, maxLife: 0.05 });
+  }
+
+  private updateShotEffects(delta: number) {
+    for (const effect of this.shotEffects) {
+      effect.life -= delta;
+      const opacity = Math.max(0, effect.life / effect.maxLife);
+      const object = effect.object as THREE.Mesh | THREE.Line;
+      const material = object.material as THREE.Material & { opacity: number };
+      material.opacity = opacity;
+    }
+    const expired = this.shotEffects.filter((effect) => effect.life <= 0);
+    for (const effect of expired) {
+      const object = effect.object as THREE.Mesh | THREE.Line;
+      object.geometry.dispose();
+      (object.material as THREE.Material).dispose();
+      this.scene.remove(effect.object);
+    }
+    this.shotEffects = this.shotEffects.filter((effect) => effect.life > 0);
+  }
+
+  private removeDeadEnemies() {
     const dead = this.enemies.filter((enemy) => enemy.hp <= 0);
     for (const enemy of dead) {
       this.emitParticles(enemy.group.position.x, 34, enemy.group.position.z, ENEMY_CONFIG[enemy.kind].color, enemy.kind === "boss" ? 24 : 10, enemy.kind === "boss" ? 110 : 64);
@@ -717,12 +668,7 @@ class OfficeEscapeGame {
       this.playerState.exp -= this.playerState.expToNext;
       this.playerState.level += 1;
       this.playerState.expToNext = Math.round(this.playerState.expToNext * 1.55 + 12);
-      this.showHint(`升级了！键盘飞镖 Lv ${Math.min(this.playerState.level, 5)}`);
-      if (this.playerState.level === 2) this.addDart();
-      if (this.playerState.level === 5) {
-        this.addDart();
-        this.addDart();
-      }
+      this.showHint(`升级了！Lv ${this.playerState.level}`);
     }
   }
 
@@ -788,6 +734,11 @@ class OfficeEscapeGame {
 
   private updateCamera(delta: number) {
     const target = new THREE.Vector3(this.playerState.x + 620, 930, this.playerState.z + 940);
+    if (this.cameraKick > 0.01) {
+      target.x += THREE.MathUtils.randFloatSpread(this.cameraKick);
+      target.z += THREE.MathUtils.randFloatSpread(this.cameraKick);
+      this.cameraKick = Math.max(0, this.cameraKick - delta * 28);
+    }
     this.camera.position.lerp(target, Math.min(1, delta * 5.8));
     this.camera.lookAt(this.playerState.x, 0, this.playerState.z);
   }
@@ -881,6 +832,12 @@ class OfficeEscapeGame {
     this.hud.card.textContent = this.hasAccessCard ? "门禁卡" : "无卡";
     this.hud.hpBar.style.width = `${(this.playerState.hp / this.playerState.maxHp) * 100}%`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
+    const weapon = this.weapon.getSnapshot(this.elapsed);
+    this.hud.ammo.textContent = `${weapon.magazineAmmo} / ${weapon.reserveAmmo}`;
+    this.hud.weaponStatus.textContent = weapon.isReloading ? "换弹中" : weapon.magazineAmmo === 0 ? "弹匣空" : "冲锋枪";
+    this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
+    this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
+    this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
   }
 
   private finish(message: string, color: string) {
@@ -951,7 +908,13 @@ class OfficeEscapeGame {
       <div class="objective-arrow"></div>
       <div class="objective-label"></div>
       <div class="joystick"><div class="joystick-knob"></div></div>
-      <div class="controls">WASD / 方向键移动 · 左下角摇杆 · R 重开</div>
+      <div class="weapon-panel">
+        <div class="weapon-status">冲锋枪</div>
+        <div class="ammo">20 / 80</div>
+        <div class="reload-track"><div class="reload-fill"></div></div>
+      </div>
+      <button class="fire-button" type="button" aria-label="射击" title="射击"><span class="fire-icon"></span></button>
+      <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
       <div class="result">
         <div class="result-box">
           <div class="result-title"></div>
@@ -978,6 +941,11 @@ class OfficeEscapeGame {
       arrowLabel: root.querySelector<HTMLDivElement>(".objective-label")!,
       joystickBase: root.querySelector<HTMLDivElement>(".joystick")!,
       joystickKnob: root.querySelector<HTMLDivElement>(".joystick-knob")!,
+      weaponPanel: root.querySelector<HTMLDivElement>(".weapon-panel")!,
+      weaponStatus: root.querySelector<HTMLDivElement>(".weapon-status")!,
+      ammo: root.querySelector<HTMLDivElement>(".ammo")!,
+      reloadBar: root.querySelector<HTMLDivElement>(".reload-fill")!,
+      fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
       result: root.querySelector<HTMLDivElement>(".result")!,
       resultTitle: root.querySelector<HTMLDivElement>(".result-title")!,
     };

@@ -23,6 +23,7 @@ canvas {
   display: block;
   width: 100%;
   height: 100%;
+  cursor: crosshair;
 }
 
 .ui-root {
@@ -251,6 +252,104 @@ canvas {
   font-size: 16px;
 }
 
+.weapon-panel {
+  position: absolute;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: max(86px, calc(env(safe-area-inset-bottom) + 46px));
+  width: 168px;
+  height: 72px;
+  padding: 9px 12px;
+  border-left: 3px solid #ffd166;
+  background: rgba(13, 19, 17, 0.78);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.weapon-status {
+  color: #cbd5c4;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ammo {
+  margin-top: 1px;
+  color: #fff7d6;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.reload-track {
+  height: 4px;
+  margin-top: 7px;
+  overflow: hidden;
+  background: rgba(2, 6, 5, 0.72);
+}
+
+.reload-fill {
+  width: 0;
+  height: 100%;
+  background: #38bdf8;
+}
+
+.weapon-panel.is-reloading .weapon-status {
+  color: #7dd3fc;
+}
+
+.weapon-panel.is-empty .ammo {
+  color: #ff8b7f;
+}
+
+.fire-button {
+  position: absolute;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  display: none;
+  width: 104px;
+  height: 104px;
+  padding: 0;
+  border: 2px solid rgba(255, 209, 102, 0.76);
+  border-radius: 50%;
+  background: rgba(13, 19, 17, 0.62);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.fire-button.is-active {
+  background: rgba(112, 76, 28, 0.82);
+  transform: scale(0.96);
+}
+
+.fire-icon,
+.fire-icon::before,
+.fire-icon::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.fire-icon {
+  width: 42px;
+  height: 42px;
+  border: 4px solid #ffd166;
+  border-radius: 50%;
+}
+
+.fire-icon::before {
+  width: 64px;
+  height: 4px;
+  background: #ffd166;
+}
+
+.fire-icon::after {
+  width: 4px;
+  height: 64px;
+  background: #ffd166;
+}
+
 .float-text {
   position: absolute;
   left: 50%;
@@ -323,5 +422,27 @@ canvas {
 
   .controls {
     display: none;
+  }
+
+  .weapon-panel {
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(150px, calc(env(safe-area-inset-bottom) + 132px));
+    width: 146px;
+  }
+
+  .fire-button {
+    display: block;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .fire-button {
+    display: block;
+  }
+
+  .weapon-panel {
+    right: max(14px, env(safe-area-inset-right));
+    bottom: max(150px, calc(env(safe-area-inset-bottom) + 132px));
+    width: 146px;
   }
 }
