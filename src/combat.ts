@@ -43,10 +43,21 @@ export const traceCircleTargets = <T>(
   for (const candidate of targets) {
     const offsetX = candidate.x - originX;
     const offsetZ = candidate.z - originZ;
-    const projectedDistance = offsetX * directionX + offsetZ * directionZ;
-    if (projectedDistance < 0 || projectedDistance > limit) continue;
-    const closestDistanceSquared = offsetX * offsetX + offsetZ * offsetZ - projectedDistance * projectedDistance;
+    const offsetDistanceSquared = offsetX * offsetX + offsetZ * offsetZ;
     const radiusSquared = candidate.radius * candidate.radius;
+    if (offsetDistanceSquared <= radiusSquared) {
+      hits.push({
+        target: candidate.target,
+        distance: 0,
+        x: originX,
+        z: originZ,
+      });
+      continue;
+    }
+
+    const projectedDistance = offsetX * directionX + offsetZ * directionZ;
+    if (projectedDistance < 0) continue;
+    const closestDistanceSquared = offsetDistanceSquared - projectedDistance * projectedDistance;
     if (closestDistanceSquared > radiusSquared) continue;
     const entryDistance = Math.max(0, projectedDistance - Math.sqrt(radiusSquared - closestDistanceSquared));
     if (entryDistance > limit) continue;
