@@ -384,6 +384,109 @@ canvas {
   animation: float-up 720ms ease forwards;
 }
 
+.upgrade-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  place-items: center;
+  padding: 24px;
+  background: rgba(5, 8, 7, 0.68);
+  pointer-events: auto;
+}
+
+.upgrade-panel.is-visible {
+  display: grid;
+}
+
+.upgrade-box {
+  width: min(92vw, 760px);
+  padding: 30px;
+  border: 1px solid rgba(250, 204, 21, 0.38);
+  background: rgba(13, 19, 17, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.52);
+}
+
+.upgrade-title {
+  color: #fff7d6;
+  font-size: 32px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.upgrade-subtitle {
+  margin-top: 5px;
+  color: #9fb0a4;
+  font-size: 15px;
+  text-align: center;
+}
+
+.upgrade-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.upgrade-option {
+  position: relative;
+  min-height: 180px;
+  padding: 24px 20px 20px;
+  border: 1px solid rgba(203, 213, 196, 0.28);
+  background: #1a2521;
+  color: #f7f2df;
+  text-align: left;
+  cursor: pointer;
+}
+
+.upgrade-option:hover,
+.upgrade-option:focus-visible {
+  border-color: #facc15;
+  outline: 0;
+  background: #24342d;
+  transform: translateY(-2px);
+}
+
+.upgrade-key {
+  position: absolute;
+  right: 14px;
+  top: 12px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid rgba(250, 204, 21, 0.56);
+  color: #fde68a;
+  font-weight: 900;
+}
+
+.upgrade-name,
+.upgrade-level,
+.upgrade-description {
+  display: block;
+}
+
+.upgrade-name {
+  padding-right: 36px;
+  color: #fff7d6;
+  font-size: 25px;
+  font-weight: 900;
+}
+
+.upgrade-level {
+  margin-top: 12px;
+  color: #7dd3fc;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.upgrade-description {
+  margin-top: 18px;
+  color: #d9e2d8;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
 @keyframes float-up {
   0% {
     opacity: 1;
@@ -456,6 +559,42 @@ canvas {
   .fire-button,
   .reload-button {
     display: block;
+  }
+
+  .upgrade-panel {
+    padding: 14px;
+  }
+
+  .upgrade-box {
+    padding: 22px 16px;
+  }
+
+  .upgrade-title {
+    font-size: 26px;
+  }
+
+  .upgrade-options {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .upgrade-option {
+    min-height: 132px;
+    padding: 18px 16px;
+  }
+
+  .upgrade-name {
+    font-size: 21px;
+  }
+
+  .upgrade-level {
+    margin-top: 7px;
+  }
+
+  .upgrade-description {
+    margin-top: 10px;
+    font-size: 15px;
   }
 }
 

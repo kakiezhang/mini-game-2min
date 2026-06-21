@@ -1,4 +1,4 @@
-import type { WeaponConfig } from "./config";
+import type { WeaponConfig, WeaponRuntimeStats } from "./config";
 
 export type WeaponUpdate = {
   fired: boolean;
@@ -24,17 +24,31 @@ export class WeaponSystem {
   private reloadEndsAt = 0;
   private isReloading = false;
   private nextDryFireAt = 0;
+  private postReloadBoostUntil = 0;
+  private stats: WeaponRuntimeStats;
 
   constructor(readonly config: WeaponConfig) {
     this.magazineAmmo = config.magazineSize;
     this.reserveAmmo = config.initialReserveAmmo;
+    this.stats = {
+      damage: config.damage,
+      fireRate: config.fireRate,
+      spreadDegrees: config.spreadDegrees,
+      criticalChance: config.criticalChance,
+      criticalMultiplier: config.criticalMultiplier,
+      magazineSize: config.magazineSize,
+      reloadTime: config.reloadTime,
+      postReloadFireRateMultiplier: 1,
+      postReloadBoostDuration: 0,
+      emptyReloadTimeMultiplier: 1,
+    };
   }
 
   update(elapsed: number, fireHeld: boolean, reloadPressed: boolean): WeaponUpdate {
     const result = { fired: false, dryFire: false, reloadStarted: false, reloadCompleted: false };
 
     if (this.isReloading && elapsed >= this.reloadEndsAt) {
-      this.finishReload();
+      this.finishReload(elapsed);
       result.reloadCompleted = true;
     }
 
@@ -51,7 +65,8 @@ export class WeaponSystem {
     }
 
     this.magazineAmmo -= 1;
-    this.nextShotAt = elapsed + 1 / this.config.fireRate;
+    const fireRateMultiplier = elapsed < this.postReloadBoostUntil ? this.stats.postReloadFireRateMultiplier : 1;
+    this.nextShotAt = elapsed + 1 / (this.stats.fireRate * fireRateMultiplier);
     result.fired = true;
     return result;
   }
@@ -61,7 +76,7 @@ export class WeaponSystem {
     const reloadProgress = this.isReloading ? Math.min(1, (elapsed - this.reloadStartedAt) / reloadDuration) : 0;
     return {
       magazineAmmo: this.magazineAmmo,
-      magazineSize: this.config.magazineSize,
+      magazineSize: this.stats.magazineSize,
       reserveAmmo: this.reserveAmmo,
       reserveAmmoMax: this.config.maxReserveAmmo,
       isReloading: this.isReloading,
@@ -75,19 +90,35 @@ export class WeaponSystem {
     return this.reserveAmmo - previousAmmo;
   }
 
+  applyStats(stats: WeaponRuntimeStats) {
+    this.stats = stats;
+    this.magazineAmmo = Math.min(this.magazineAmmo, stats.magazineSize);
+  }
+
+  getAttackStats() {
+    return {
+      damage: this.stats.damage,
+      spreadDegrees: this.stats.spreadDegrees,
+      criticalChance: this.stats.criticalChance,
+      criticalMultiplier: this.stats.criticalMultiplier,
+    };
+  }
+
   private startReload(elapsed: number) {
-    if (this.isReloading || this.magazineAmmo >= this.config.magazineSize || this.reserveAmmo <= 0) return false;
+    if (this.isReloading || this.magazineAmmo >= this.stats.magazineSize || this.reserveAmmo <= 0) return false;
     this.isReloading = true;
     this.reloadStartedAt = elapsed;
-    this.reloadEndsAt = elapsed + this.config.reloadTime;
+    const emptyReloadMultiplier = this.magazineAmmo === 0 ? this.stats.emptyReloadTimeMultiplier : 1;
+    this.reloadEndsAt = elapsed + this.stats.reloadTime * emptyReloadMultiplier;
     return true;
   }
 
-  private finishReload() {
-    const missingAmmo = this.config.magazineSize - this.magazineAmmo;
+  private finishReload(elapsed: number) {
+    const missingAmmo = this.stats.magazineSize - this.magazineAmmo;
     const loadedAmmo = Math.min(missingAmmo, this.reserveAmmo);
     this.magazineAmmo += loadedAmmo;
     this.reserveAmmo -= loadedAmmo;
     this.isReloading = false;
+    this.postReloadBoostUntil = elapsed + this.stats.postReloadBoostDuration;
   }
 }

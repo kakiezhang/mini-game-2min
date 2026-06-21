@@ -108,6 +108,9 @@ export type WeaponConfig = {
   damage: number;
   fireRate: number;
   range: number;
+  spreadDegrees: number;
+  criticalChance: number;
+  criticalMultiplier: number;
   magazineSize: number;
   initialReserveAmmo: number;
   maxReserveAmmo: number;
@@ -120,10 +123,91 @@ export const DEFAULT_WEAPON: WeaponConfig = {
   damage: 18,
   fireRate: 5,
   range: 720,
+  spreadDegrees: 2,
+  criticalChance: 0,
+  criticalMultiplier: 1.8,
   magazineSize: 20,
   initialReserveAmmo: 80,
   maxReserveAmmo: 120,
   reloadTime: 1.3,
+};
+
+export type WeaponUpgradeId = "firepowerCalibration" | "magazineManagement";
+
+export type WeaponUpgradeLevels = Record<WeaponUpgradeId, number>;
+
+export type WeaponRuntimeStats = {
+  damage: number;
+  fireRate: number;
+  spreadDegrees: number;
+  criticalChance: number;
+  criticalMultiplier: number;
+  magazineSize: number;
+  reloadTime: number;
+  postReloadFireRateMultiplier: number;
+  postReloadBoostDuration: number;
+  emptyReloadTimeMultiplier: number;
+};
+
+export const WEAPON_UPGRADE_DEFINITIONS: Record<WeaponUpgradeId, {
+  title: string;
+  descriptions: readonly string[];
+}> = {
+  firepowerCalibration: {
+    title: "火力校准",
+    descriptions: [
+      "单发伤害提升 15%",
+      "射速提升 12%",
+      "单发伤害累计提升至 30%",
+      "连续射击散布降低 30%",
+      "暴击概率提升至 12%",
+    ],
+  },
+  magazineManagement: {
+    title: "弹匣管理",
+    descriptions: [
+      "弹匣容量提升至 26 发",
+      "换弹时间缩短至 1.05 秒",
+      "弹匣容量提升至 32 发",
+      "换弹后 1 秒内射速提升 20%",
+      "空仓换弹时间额外缩短 25%",
+    ],
+  },
+};
+
+const FIREPOWER_LEVELS = [
+  { damageMultiplier: 1, fireRateMultiplier: 1, spreadMultiplier: 1, criticalChance: 0 },
+  { damageMultiplier: 1.15, fireRateMultiplier: 1, spreadMultiplier: 1, criticalChance: 0 },
+  { damageMultiplier: 1.15, fireRateMultiplier: 1.12, spreadMultiplier: 1, criticalChance: 0 },
+  { damageMultiplier: 1.3, fireRateMultiplier: 1.12, spreadMultiplier: 1, criticalChance: 0 },
+  { damageMultiplier: 1.3, fireRateMultiplier: 1.12, spreadMultiplier: 0.7, criticalChance: 0 },
+  { damageMultiplier: 1.3, fireRateMultiplier: 1.12, spreadMultiplier: 0.7, criticalChance: 0.12 },
+] as const;
+
+const MAGAZINE_LEVELS = [
+  { magazineSize: 20, reloadTime: 1.3, postReloadFireRateMultiplier: 1, postReloadBoostDuration: 0, emptyReloadTimeMultiplier: 1 },
+  { magazineSize: 26, reloadTime: 1.3, postReloadFireRateMultiplier: 1, postReloadBoostDuration: 0, emptyReloadTimeMultiplier: 1 },
+  { magazineSize: 26, reloadTime: 1.05, postReloadFireRateMultiplier: 1, postReloadBoostDuration: 0, emptyReloadTimeMultiplier: 1 },
+  { magazineSize: 32, reloadTime: 1.05, postReloadFireRateMultiplier: 1, postReloadBoostDuration: 0, emptyReloadTimeMultiplier: 1 },
+  { magazineSize: 32, reloadTime: 1.05, postReloadFireRateMultiplier: 1.2, postReloadBoostDuration: 1, emptyReloadTimeMultiplier: 1 },
+  { magazineSize: 32, reloadTime: 1.05, postReloadFireRateMultiplier: 1.2, postReloadBoostDuration: 1, emptyReloadTimeMultiplier: 0.75 },
+] as const;
+
+export const getWeaponRuntimeStats = (levels: WeaponUpgradeLevels): WeaponRuntimeStats => {
+  const firepower = FIREPOWER_LEVELS[Math.max(0, Math.min(5, levels.firepowerCalibration))];
+  const magazine = MAGAZINE_LEVELS[Math.max(0, Math.min(5, levels.magazineManagement))];
+  return {
+    damage: DEFAULT_WEAPON.damage * firepower.damageMultiplier,
+    fireRate: DEFAULT_WEAPON.fireRate * firepower.fireRateMultiplier,
+    spreadDegrees: DEFAULT_WEAPON.spreadDegrees * firepower.spreadMultiplier,
+    criticalChance: firepower.criticalChance,
+    criticalMultiplier: DEFAULT_WEAPON.criticalMultiplier,
+    magazineSize: magazine.magazineSize,
+    reloadTime: magazine.reloadTime,
+    postReloadFireRateMultiplier: magazine.postReloadFireRateMultiplier,
+    postReloadBoostDuration: magazine.postReloadBoostDuration,
+    emptyReloadTimeMultiplier: magazine.emptyReloadTimeMultiplier,
+  };
 };
 
 export const BULLET_VISUAL = {

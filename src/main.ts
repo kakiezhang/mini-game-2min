@@ -10,9 +10,13 @@ import {
   GAME,
   MAP,
   PLAYER_CONFIG,
+  WEAPON_UPGRADE_DEFINITIONS,
   getExpToNext,
   getSpawnStage,
+  getWeaponRuntimeStats,
   type EnemyKind,
+  type WeaponUpgradeId,
+  type WeaponUpgradeLevels,
 } from "./config";
 import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
@@ -115,6 +119,12 @@ class OfficeEscapeGame {
   private nextAmmoHintAt = 0;
   private cameraKick = 0;
   private playerInvincibleUntil = 0;
+  private pendingLevelUps = 0;
+  private currentUpgradeChoices: WeaponUpgradeId[] = [];
+  private readonly weaponUpgradeLevels: WeaponUpgradeLevels = {
+    firepowerCalibration: 0,
+    magazineManagement: 0,
+  };
 
   private readonly playerState = {
     x: 270,
@@ -398,6 +408,7 @@ class OfficeEscapeGame {
 
   private bindEvents() {
     window.addEventListener("resize", () => this.resize());
+    window.addEventListener("keydown", this.onUpgradeKeyDown);
   }
 
   private animate = () => {
@@ -440,6 +451,7 @@ class OfficeEscapeGame {
     this.refreshHud();
 
     this.resolveGameResult();
+    this.tryOpenUpgradePanel();
   }
 
   private updatePlayer(delta: number, input: InputState) {
@@ -717,20 +729,28 @@ class OfficeEscapeGame {
   }
 
   private fireWeapon(directionX: number, directionZ: number) {
-    const originX = this.playerState.x + directionX * 34;
-    const originZ = this.playerState.z + directionZ * 34;
-    this.resolveAttack({
+    const stats = this.weapon.getAttackStats();
+    const spreadOffset = THREE.MathUtils.randFloatSpread(THREE.MathUtils.degToRad(stats.spreadDegrees));
+    const spreadCos = Math.cos(spreadOffset);
+    const spreadSin = Math.sin(spreadOffset);
+    const shotDirectionX = directionX * spreadCos - directionZ * spreadSin;
+    const shotDirectionZ = directionX * spreadSin + directionZ * spreadCos;
+    const critical = Math.random() < stats.criticalChance;
+    const originX = this.playerState.x + shotDirectionX * 34;
+    const originZ = this.playerState.z + shotDirectionZ * 34;
+    const hitCount = this.resolveAttack({
       sourceId: "player",
       weaponId: DEFAULT_WEAPON.id,
       mode: DEFAULT_WEAPON.attackMode,
       originX,
       originZ,
-      directionX,
-      directionZ,
+      directionX: shotDirectionX,
+      directionZ: shotDirectionZ,
       range: DEFAULT_WEAPON.range,
-      damage: DEFAULT_WEAPON.damage,
+      damage: stats.damage * (critical ? stats.criticalMultiplier : 1),
       maxHits: 1,
     });
+    if (critical && hitCount > 0) this.showFloating("暴击", "#fde68a");
   }
 
   private resolveAttack(request: AttackRequest) {
@@ -776,6 +796,7 @@ class OfficeEscapeGame {
     this.createBulletVisual(request.originX, request.originZ, endX, endZ, impact);
     this.createMuzzleFlash(request.originX, request.originZ);
     this.cameraKick = Math.min(7, this.cameraKick + 2.2);
+    return trace.hits.length;
   }
 
   private createBulletVisual(
@@ -888,9 +909,81 @@ class OfficeEscapeGame {
       this.playerState.exp -= this.playerState.expToNext;
       this.playerState.level += 1;
       this.playerState.expToNext = getExpToNext(this.playerState.level);
-      this.showHint(`升级了！Lv ${this.playerState.level}`);
+      this.pendingLevelUps += 1;
     }
   }
+
+  private tryOpenUpgradePanel() {
+    if (this.gameState !== "playing" || this.pendingLevelUps <= 0) return;
+    this.openUpgradePanel();
+  }
+
+  private openUpgradePanel() {
+    const available = (Object.keys(this.weaponUpgradeLevels) as WeaponUpgradeId[])
+      .filter((id) => this.weaponUpgradeLevels[id] < 5);
+    if (available.length === 0) {
+      this.pendingLevelUps = 0;
+      this.closeUpgradePanel();
+      return;
+    }
+
+    for (let index = available.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [available[index], available[swapIndex]] = [available[swapIndex], available[index]];
+    }
+    this.currentUpgradeChoices = available.slice(0, 3);
+    this.renderUpgradeChoices();
+    this.hud.upgradePanel.classList.add("is-visible");
+    if (this.gameState === "playing") this.transitionTo("levelUpPaused");
+  }
+
+  private renderUpgradeChoices() {
+    this.hud.upgradeOptions.replaceChildren();
+    for (const [index, id] of this.currentUpgradeChoices.entries()) {
+      const definition = WEAPON_UPGRADE_DEFINITIONS[id];
+      const currentLevel = this.weaponUpgradeLevels[id];
+      const button = document.createElement("button");
+      button.className = "upgrade-option";
+      button.type = "button";
+      button.innerHTML = `
+        <span class="upgrade-key">${index + 1}</span>
+        <span class="upgrade-name">${definition.title}</span>
+        <span class="upgrade-level">Lv ${currentLevel} → Lv ${currentLevel + 1}</span>
+        <span class="upgrade-description">${definition.descriptions[currentLevel]}</span>
+      `;
+      button.addEventListener("click", () => this.selectWeaponUpgrade(id));
+      this.hud.upgradeOptions.append(button);
+    }
+  }
+
+  private selectWeaponUpgrade(id: WeaponUpgradeId) {
+    if (this.gameState !== "levelUpPaused" || !this.currentUpgradeChoices.includes(id)) return;
+    this.weaponUpgradeLevels[id] = Math.min(5, this.weaponUpgradeLevels[id] + 1);
+    this.weapon.applyStats(getWeaponRuntimeStats(this.weaponUpgradeLevels));
+    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+    const definition = WEAPON_UPGRADE_DEFINITIONS[id];
+    this.showHint(`${definition.title} Lv ${this.weaponUpgradeLevels[id]}`);
+
+    if (this.pendingLevelUps > 0) {
+      this.openUpgradePanel();
+    } else {
+      this.closeUpgradePanel();
+    }
+  }
+
+  private closeUpgradePanel() {
+    this.currentUpgradeChoices = [];
+    this.hud.upgradePanel.classList.remove("is-visible");
+    if (this.gameState === "levelUpPaused") this.transitionTo("playing");
+  }
+
+  private onUpgradeKeyDown = (event: KeyboardEvent) => {
+    if (this.gameState !== "levelUpPaused") return;
+    const index = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
+    if (index < 0 || index >= this.currentUpgradeChoices.length) return;
+    event.preventDefault();
+    this.selectWeaponUpgrade(this.currentUpgradeChoices[index]);
+  };
 
   private spawnAccessCard() {
     this.accessCard = new THREE.Group();
@@ -1157,6 +1250,13 @@ class OfficeEscapeGame {
       <button class="fire-button" type="button" aria-label="射击" title="射击"><span class="fire-icon"></span></button>
       <button class="reload-button" type="button" aria-label="换弹" title="换弹">R</button>
       <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
+      <div class="upgrade-panel" role="dialog" aria-modal="true" aria-label="选择强化">
+        <div class="upgrade-box">
+          <div class="upgrade-title">选择一项强化</div>
+          <div class="upgrade-subtitle">游戏已暂停</div>
+          <div class="upgrade-options"></div>
+        </div>
+      </div>
       <div class="result">
         <div class="result-box">
           <div class="result-title"></div>
@@ -1189,6 +1289,8 @@ class OfficeEscapeGame {
       reloadBar: root.querySelector<HTMLDivElement>(".reload-fill")!,
       fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
       reloadButton: root.querySelector<HTMLButtonElement>(".reload-button")!,
+      upgradePanel: root.querySelector<HTMLDivElement>(".upgrade-panel")!,
+      upgradeOptions: root.querySelector<HTMLDivElement>(".upgrade-options")!,
       result: root.querySelector<HTMLDivElement>(".result")!,
       resultTitle: root.querySelector<HTMLDivElement>(".result-title")!,
     };
