@@ -1,7 +1,19 @@
 import * as THREE from "three";
 import "./styles.css";
 import { traceCircleTargets, type AttackRequest } from "./combat";
-import { AMMO_CONFIG, BULLET_VISUAL, COLORS, DEFAULT_WEAPON, ENEMY_CONFIG, GAME, MAP, getSpawnStage, type EnemyKind } from "./config";
+import {
+  AMMO_CONFIG,
+  BULLET_VISUAL,
+  COLORS,
+  DEFAULT_WEAPON,
+  ENEMY_CONFIG,
+  GAME,
+  MAP,
+  PLAYER_CONFIG,
+  getExpToNext,
+  getSpawnStage,
+  type EnemyKind,
+} from "./config";
 import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
 import { WeaponSystem } from "./weapon";
@@ -53,6 +65,16 @@ type AmmoPickup = {
   phase: number;
 };
 
+type GameState = "ready" | "playing" | "levelUpPaused" | "success" | "failed";
+
+const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
+  ready: ["playing"],
+  playing: ["levelUpPaused", "success", "failed"],
+  levelUpPaused: ["playing", "success", "failed"],
+  success: [],
+  failed: [],
+};
+
 class OfficeEscapeGame {
   private readonly app = document.querySelector<HTMLDivElement>("#app")!;
   private readonly scene = new THREE.Scene();
@@ -78,29 +100,31 @@ class OfficeEscapeGame {
   private nextEnemyId = 1;
   private spawnTimer = 0;
   private elapsed = 0;
-  private gameOver = false;
+  private gameState: GameState = "ready";
   private accessCardSpawned = false;
   private hasAccessCard = false;
   private elevatorSoonShown = false;
   private elevatorOpen = false;
   private bossSpawned = false;
   private evacuationProgress = 0;
+  private evacuationComplete = false;
   private nextElevatorHintAt = 0;
   private slowUntil = 0;
   private lastHintTimer = 0;
   private nextWeaponHintAt = 0;
   private nextAmmoHintAt = 0;
   private cameraKick = 0;
+  private playerInvincibleUntil = 0;
 
   private readonly playerState = {
     x: 270,
     z: 840,
-    hp: 100,
-    maxHp: 100,
-    speed: 220,
-    exp: 0,
-    expToNext: 20,
-    level: 1,
+    hp: PLAYER_CONFIG.initialHp,
+    maxHp: PLAYER_CONFIG.maxHp,
+    speed: PLAYER_CONFIG.baseSpeed,
+    exp: PLAYER_CONFIG.initialExp,
+    expToNext: getExpToNext(PLAYER_CONFIG.initialLevel),
+    level: PLAYER_CONFIG.initialLevel,
   };
 
   private readonly hud = this.createHud();
@@ -127,6 +151,7 @@ class OfficeEscapeGame {
     this.bindEvents();
     this.showHint("距离下班还有 120 秒");
     this.resize();
+    this.transitionTo("playing");
     this.animate();
   }
 
@@ -383,10 +408,14 @@ class OfficeEscapeGame {
   };
 
   private update(delta: number) {
-    if (this.gameOver) {
+    if (this.gameState === "success" || this.gameState === "failed") {
       this.updateBulletVisuals(delta);
       this.updateParticles(delta);
       this.updateShotEffects(delta);
+      return;
+    }
+    if (this.gameState !== "playing") {
+      this.refreshHud();
       return;
     }
 
@@ -410,9 +439,7 @@ class OfficeEscapeGame {
     this.updateObjectiveArrow();
     this.refreshHud();
 
-    if (this.gameOver) return;
-    if (this.playerState.hp <= 0) this.finish("你被工作压垮了", "#ef4444");
-    else if (this.elapsed >= GAME.duration) this.finish("你被迫加班了", "#f97316");
+    this.resolveGameResult();
   }
 
   private updatePlayer(delta: number, input: InputState) {
@@ -423,7 +450,7 @@ class OfficeEscapeGame {
       this.playerState.z,
       input.moveX * speed * delta,
       input.moveZ * speed * delta,
-      GAME.playerRadius,
+      PLAYER_CONFIG.radius,
     );
     this.playerState.x = nextPosition.x;
     this.playerState.z = nextPosition.z;
@@ -574,8 +601,13 @@ class OfficeEscapeGame {
       enemy.group.rotation.y = Math.atan2(moveX, moveZ);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
-      if (contactDistance < GAME.playerRadius + enemy.radius && this.elapsed >= enemy.nextHitAt) {
+      if (
+        contactDistance < PLAYER_CONFIG.radius + enemy.radius
+        && this.elapsed >= enemy.nextHitAt
+        && this.elapsed >= this.playerInvincibleUntil
+      ) {
         enemy.nextHitAt = this.elapsed + enemy.contactCooldown;
+        this.playerInvincibleUntil = this.elapsed + PLAYER_CONFIG.invincibleAfterHit;
         this.playerState.hp = Math.max(0, this.playerState.hp - enemy.damage);
         this.emitParticles(this.playerState.x, 26, this.playerState.z, 0xff6b6b, 5, 48);
         this.showFloating(`-${enemy.damage}`, "#ffb4a8");
@@ -637,7 +669,7 @@ class OfficeEscapeGame {
 
       pickup.group.rotation.y += delta * (pickup.fixed ? 0.7 : 1.4);
       pickup.group.position.y = Math.sin(this.elapsed * 2.5 + pickup.phase) * 3;
-      if (this.distanceToPlayer(pickup.group.position.x, pickup.group.position.z) > GAME.playerRadius + pickup.radius) continue;
+      if (this.distanceToPlayer(pickup.group.position.x, pickup.group.position.z) > PLAYER_CONFIG.radius + pickup.radius) continue;
 
       const addedAmmo = this.weapon.addReserveAmmo(pickup.amount);
       if (addedAmmo <= 0) {
@@ -855,7 +887,7 @@ class OfficeEscapeGame {
     while (this.playerState.exp >= this.playerState.expToNext) {
       this.playerState.exp -= this.playerState.expToNext;
       this.playerState.level += 1;
-      this.playerState.expToNext = Math.round(this.playerState.expToNext * 1.55 + 12);
+      this.playerState.expToNext = getExpToNext(this.playerState.level);
       this.showHint(`升级了！Lv ${this.playerState.level}`);
     }
   }
@@ -875,7 +907,7 @@ class OfficeEscapeGame {
     if (!this.accessCard || this.hasAccessCard) return;
     this.accessCard.rotation.y += 0.04;
     this.accessCard.position.y = Math.sin(this.elapsed * 3) * 5;
-    if (this.distanceToPlayer(this.accessCard.position.x, this.accessCard.position.z) <= GAME.playerRadius + 30) {
+    if (this.distanceToPlayer(this.accessCard.position.x, this.accessCard.position.z) <= PLAYER_CONFIG.radius + 30) {
       this.hasAccessCard = true;
       this.scene.remove(this.accessCard);
       this.accessCard = undefined;
@@ -907,7 +939,18 @@ class OfficeEscapeGame {
     this.evacuationProgress += delta;
     this.hud.evac.classList.add("is-visible");
     this.hud.evacBar.style.width = `${Math.min(100, (this.evacuationProgress / GAME.elevatorHoldTime) * 100)}%`;
-    if (this.evacuationProgress >= GAME.elevatorHoldTime) this.finish("下班成功！今日无事发生", "#22c55e");
+    if (this.evacuationProgress >= GAME.elevatorHoldTime) this.evacuationComplete = true;
+  }
+
+  private resolveGameResult() {
+    if (this.gameState !== "playing") return;
+    if (this.playerState.hp <= 0) {
+      this.finishGame("failed", "你被工作压垮了", "#ef4444");
+    } else if (this.evacuationComplete) {
+      this.finishGame("success", "下班成功！今日无事发生", "#22c55e");
+    } else if (this.elapsed >= GAME.duration) {
+      this.finishGame("failed", "你被迫加班了", "#f97316");
+    }
   }
 
   private throttledElevatorHint(message: string) {
@@ -1028,12 +1071,22 @@ class OfficeEscapeGame {
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
   }
 
-  private finish(message: string, color: string) {
-    if (this.gameOver) return;
-    this.gameOver = true;
+  private finishGame(state: "success" | "failed", message: string, color: string) {
+    this.transitionTo(state);
     this.hud.resultTitle.textContent = message;
     this.hud.resultTitle.style.color = color;
     this.hud.result.classList.add("is-visible");
+    this.hud.arrow.classList.remove("is-visible");
+    this.hud.arrowLabel.classList.remove("is-visible");
+  }
+
+  private transitionTo(nextState: GameState) {
+    if (nextState === this.gameState) return;
+    if (!GAME_STATE_TRANSITIONS[this.gameState].includes(nextState)) {
+      throw new Error(`Invalid game state transition: ${this.gameState} -> ${nextState}`);
+    }
+    this.gameState = nextState;
+    this.hud.root.dataset.gameState = nextState;
   }
 
   private resize() {

@@ -6,8 +6,24 @@ export const MAP = {
 export const GAME = {
   duration: 120,
   maxEnemies: 30,
-  playerRadius: 20,
   elevatorHoldTime: 2,
+};
+
+export const PLAYER_CONFIG = {
+  maxHp: 100,
+  initialHp: 100,
+  baseSpeed: 220,
+  radius: 20,
+  initialLevel: 1,
+  initialExp: 0,
+  invincibleAfterHit: 0.35,
+};
+
+export const EXP_TO_NEXT_BY_LEVEL = [20, 45, 75, 110, 150, 195, 245, 300] as const;
+
+export const getExpToNext = (level: number) => {
+  const index = Math.max(0, Math.min(EXP_TO_NEXT_BY_LEVEL.length - 1, Math.floor(level) - 1));
+  return EXP_TO_NEXT_BY_LEVEL[index];
 };
 
 export const COLORS = {
