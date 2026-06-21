@@ -1,6 +1,6 @@
 DEV_HOST ?= 127.0.0.1
-DEV_PORT ?= 5173
-PREVIEW_PORT ?= 4173
+DEV_PORT ?= 6173
+PREVIEW_PORT ?= 6174
 
 .PHONY: install dev start build preview
 
