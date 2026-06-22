@@ -409,7 +409,22 @@ class OfficeEscapeGame {
   private bindEvents() {
     window.addEventListener("resize", () => this.resize());
     window.addEventListener("keydown", this.onUpgradeKeyDown);
+    this.app.addEventListener("dblclick", this.preventBrowserGesture);
+    this.app.addEventListener("selectstart", this.preventBrowserGesture);
+    this.app.addEventListener("gesturestart", this.preventBrowserGesture, { passive: false });
+    this.app.addEventListener("gesturechange", this.preventBrowserGesture, { passive: false });
+    this.app.addEventListener("gestureend", this.preventBrowserGesture, { passive: false });
+    this.app.addEventListener("touchstart", this.preventMultiTouchGesture, { passive: false });
+    this.app.addEventListener("touchmove", this.preventMultiTouchGesture, { passive: false });
   }
+
+  private preventBrowserGesture = (event: Event) => {
+    event.preventDefault();
+  };
+
+  private preventMultiTouchGesture = (event: TouchEvent) => {
+    if (event.touches.length > 1) event.preventDefault();
+  };
 
   private animate = () => {
     requestAnimationFrame(this.animate);

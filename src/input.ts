@@ -175,6 +175,7 @@ export class InputController {
   };
 
   private onJoystickDown = (event: PointerEvent) => {
+    event.preventDefault();
     this.joystickActive = true;
     this.joystickPointerId = event.pointerId;
     const rect = this.joystick.base.getBoundingClientRect();
@@ -185,6 +186,7 @@ export class InputController {
   };
 
   private onJoystickMove = (event: PointerEvent) => {
+    event.preventDefault();
     if (!this.joystickActive || this.joystickPointerId !== event.pointerId) return;
     this.updateJoystick(event.clientX, event.clientY);
   };
