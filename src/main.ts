@@ -14,6 +14,7 @@ import {
   getExpToNext,
   getSpawnStage,
   getWeaponRuntimeStats,
+  type EnemyConfig,
   type EnemyKind,
   type WeaponUpgradeId,
   type WeaponUpgradeLevels,
@@ -26,6 +27,8 @@ type Enemy = {
   id: number;
   kind: EnemyKind;
   group: THREE.Group;
+  healthBar: THREE.Group;
+  healthFill: THREE.Mesh;
   radius: number;
   hp: number;
   maxHp: number;
@@ -34,13 +37,18 @@ type Enemy = {
   expReward: number;
   contactCooldown: number;
   nextHitAt: number;
+  hitFlashUntil: number;
+  hitFlashActive: boolean;
   surroundAngle: number;
   surroundRadius: number;
+  separationX: number;
+  separationZ: number;
 };
 
 type Particle = {
   mesh: THREE.Mesh;
   velocity: THREE.Vector3;
+  size: number;
   life: number;
   maxLife: number;
 };
@@ -70,6 +78,28 @@ type AmmoPickup = {
 };
 
 type GameState = "ready" | "playing" | "levelUpPaused" | "success" | "failed";
+type SurfaceStyle = "concrete" | "tile" | "carpet" | "wall" | "wood" | "metal" | "plastic" | "paper";
+type PlayerSpriteDirection = "down" | "downRight" | "right" | "upRight" | "up" | "upLeft" | "left" | "downLeft";
+
+const TEXTURE_URLS: Partial<Record<SurfaceStyle, string>> = {
+  concrete: new URL("./assets/textures/concrete.png", import.meta.url).href,
+  tile: new URL("./assets/textures/floor-tile.png", import.meta.url).href,
+  carpet: new URL("./assets/textures/carpet.png", import.meta.url).href,
+  wall: new URL("./assets/textures/wall.png", import.meta.url).href,
+  wood: new URL("./assets/textures/wood.png", import.meta.url).href,
+  metal: new URL("./assets/textures/metal.png", import.meta.url).href,
+};
+
+const CHARACTER_TEXTURE_URLS = {
+  monkeyFur: new URL("./assets/textures/monkey-fur.png", import.meta.url).href,
+  monkeyHoodie: new URL("./assets/textures/monkey-hoodie.png", import.meta.url).href,
+  oxHide: new URL("./assets/textures/ox-hide.png", import.meta.url).href,
+  horseHide: new URL("./assets/textures/horse-hide.png", import.meta.url).href,
+  meetingHide: new URL("./assets/textures/meeting-hide.png", import.meta.url).href,
+  bossBull: new URL("./assets/textures/boss-bull.png", import.meta.url).href,
+} as const;
+
+const PLAYER_SPRITE_URL = new URL("./assets/characters/player-monkey-sheet.png", import.meta.url).href;
 
 const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
   ready: ["playing"],
@@ -79,6 +109,42 @@ const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
   failed: [],
 };
 
+const ENEMY_SEPARATION_INTERVAL = 0.08;
+const MAX_ACTIVE_PARTICLES = 90;
+const PLAYER_SPRITE_COLUMNS = 5;
+const PLAYER_SPRITE_ROWS = 8;
+const PLAYER_WALK_FRAME_RATE = 10;
+const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
+const PLAYER_SPRITE_WIDTH = 164;
+const PLAYER_SPRITE_HEIGHT = 102;
+const PLAYER_SPRITE_SOURCE_WIDTH = 2560;
+const PLAYER_SPRITE_SOURCE_HEIGHT = 2560;
+const PLAYER_SPRITE_UV_INSET_PIXELS = 2;
+const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
+  down: 0,
+  downRight: 1,
+  right: 2,
+  upRight: 3,
+  up: 4,
+  upLeft: 5,
+  left: 6,
+  downLeft: 7,
+};
+const PLAYER_SCREEN_DIRECTIONS: PlayerSpriteDirection[] = [
+  "right",
+  "upRight",
+  "up",
+  "upLeft",
+  "left",
+  "downLeft",
+  "down",
+  "downRight",
+];
+const PLAYER_SCREEN_DIRECTION_INDEX = PLAYER_SCREEN_DIRECTIONS.reduce<Record<PlayerSpriteDirection, number>>((indices, direction, index) => {
+  indices[direction] = index;
+  return indices;
+}, {} as Record<PlayerSpriteDirection, number>);
+
 class OfficeEscapeGame {
   private readonly app = document.querySelector<HTMLDivElement>("#app")!;
   private readonly scene = new THREE.Scene();
@@ -87,22 +153,35 @@ class OfficeEscapeGame {
   private readonly clock = new THREE.Clock();
   private readonly navigation = new NavigationWorld(MAP.width, MAP.depth);
   private readonly weapon = new WeaponSystem(DEFAULT_WEAPON);
+  private readonly materialCache = new Map<string, THREE.MeshStandardMaterial>();
+  private readonly textureCache = new Map<string, THREE.Texture>();
+  private readonly textureLoader = new THREE.TextureLoader();
+  private readonly particleGeometry = new THREE.SphereGeometry(1, 6, 4);
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
+  private playerSpriteTexture?: THREE.Texture;
+  private playerSpriteDirection: PlayerSpriteDirection = "down";
+  private playerSpriteFrame = 0;
+  private playerSpriteTimer = 0;
   private input?: InputController;
   private crosshair?: THREE.Group;
   private enemies: Enemy[] = [];
   private particles: Particle[] = [];
   private shotEffects: ShotEffect[] = [];
   private bulletVisuals: BulletVisual[] = [];
+  private impactDecals: THREE.Mesh[] = [];
   private ammoPickups: AmmoPickup[] = [];
   private accessCard?: THREE.Group;
+  private accessCardBeacon?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
+  private elevatorBeacon?: THREE.Group;
   private elevatorDoors: THREE.Mesh[] = [];
   private elevatorDoorObstacle?: Obstacle;
+  private bossAlertBeacon?: THREE.Group;
   private nextEnemyId = 1;
   private spawnTimer = 0;
+  private enemySeparationTimer = 0;
   private elapsed = 0;
   private gameState: GameState = "ready";
   private accessCardSpawned = false;
@@ -110,6 +189,7 @@ class OfficeEscapeGame {
   private elevatorSoonShown = false;
   private elevatorOpen = false;
   private bossSpawned = false;
+  private bossAlertUntil = 0;
   private evacuationProgress = 0;
   private evacuationComplete = false;
   private nextElevatorHintAt = 0;
@@ -141,9 +221,12 @@ class OfficeEscapeGame {
 
   constructor() {
     this.app.innerHTML = "";
-    this.scene.background = new THREE.Color(0x111816);
-    this.scene.fog = new THREE.Fog(0x111816, 1200, 2900);
+    this.scene.background = new THREE.Color(0x17221f);
+    this.scene.fog = new THREE.Fog(0x17221f, 1120, 2850);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.38;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.app.append(this.renderer.domElement, this.hud.root);
@@ -171,22 +254,30 @@ class OfficeEscapeGame {
   }
 
   private createLights() {
-    const ambient = new THREE.HemisphereLight(0xf6edd8, 0x1c2a25, 0.75);
+    const ambient = new THREE.HemisphereLight(0xfff2d2, 0x1d302b, 0.82);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xfff2d0, 1.25);
-    sun.position.set(-450, 900, 400);
+    const sun = new THREE.DirectionalLight(0xffe4b0, 2.35);
+    sun.position.set(-520, 980, 340);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.00018;
+    sun.shadow.normalBias = 0.035;
     sun.shadow.camera.left = -950;
     sun.shadow.camera.right = 950;
     sun.shadow.camera.top = 1200;
     sun.shadow.camera.bottom = -1200;
+    sun.shadow.camera.near = 120;
+    sun.shadow.camera.far = 2400;
     this.scene.add(sun);
 
-    this.addAreaLight(270, 280, 0xf8d98d, 0.7);
-    this.addAreaLight(810, 840, 0xb9f5bf, 0.55);
-    this.addAreaLight(540, 1440, 0x9fd0ff, 0.75);
+    const rim = new THREE.DirectionalLight(0xa6e7ff, 0.62);
+    rim.position.set(740, 420, 1180);
+    this.scene.add(rim);
+
+    this.addAreaLight(270, 280, 0xffd27a, 1.08);
+    this.addAreaLight(810, 840, 0xb9f5bf, 0.9);
+    this.addAreaLight(540, 1440, 0x9fd0ff, 1.12);
   }
 
   private addAreaLight(x: number, z: number, color: number, intensity: number) {
@@ -196,21 +287,21 @@ class OfficeEscapeGame {
   }
 
   private createMap() {
-    const ground = this.box(MAP.width, 8, MAP.depth, COLORS.floor, 0.92);
+    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0x3d4942, 0.94, "concrete", 6, 9));
     ground.position.set(MAP.width / 2, -4, MAP.depth / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
 
     const rooms = [
-      { x: 270, z: 280, w: 520, d: 540, color: 0x33433d },
-      { x: 810, z: 280, w: 520, d: 540, color: 0x403936 },
-      { x: 270, z: 840, w: 520, d: 540, color: 0x293f47 },
-      { x: 810, z: 840, w: 520, d: 540, color: 0x354635 },
-      { x: 540, z: 1420, w: 1040, d: 560, color: 0x313a44 },
+      { x: 270, z: 280, w: 520, d: 540, color: 0x33433d, style: "carpet" },
+      { x: 810, z: 280, w: 520, d: 540, color: 0x403936, style: "carpet" },
+      { x: 270, z: 840, w: 520, d: 540, color: 0x293f47, style: "tile" },
+      { x: 810, z: 840, w: 520, d: 540, color: 0x354635, style: "tile" },
+      { x: 540, z: 1420, w: 1040, d: 560, color: 0x313a44, style: "concrete" },
     ];
 
     for (const room of rooms) {
-      const floor = this.box(room.w, 6, room.d, room.color, 0.9);
+      const floor = this.texturedBox(room.w, 6, room.d, this.surfaceMaterial(`room-${room.x}-${room.z}`, room.color, 0x5f6a60, 0.94, room.style as SurfaceStyle, 4, 4));
       floor.position.set(room.x, 1, room.z);
       floor.receiveShadow = true;
       this.scene.add(floor);
@@ -231,18 +322,19 @@ class OfficeEscapeGame {
     this.addWall(540, 681, 24, 218);
     this.addWall(540, 1019, 24, 178);
 
-    this.addDesk(250, 770, 270, 70, 42, 0x8a623a);
-    this.addDesk(260, 925, 240, 70, 42, 0x8a623a);
-    this.addDesk(270, 280, 280, 118, 46, 0x78634c);
-    this.addDesk(820, 265, 260, 118, 54, 0x734d45);
+    this.addDesk(250, 770, 270, 70, 42, 0xa66f3f);
+    this.addDesk(260, 925, 240, 70, 42, 0xa66f3f);
+    this.addDesk(270, 280, 280, 118, 46, 0x9a6a42);
+    this.addDesk(820, 265, 260, 118, 54, 0x8f5a35);
     this.addCoffeeMachine(825, 805);
     this.addElevatorDoor();
     this.addChairs();
+    this.addSceneDressing();
     this.addFloorNoise();
   }
 
   private addWall(x: number, z: number, width: number, depth: number) {
-    const wall = this.box(width, 90, depth, COLORS.wall, 1);
+    const wall = this.texturedBox(width, 90, depth, this.surfaceMaterial("painted-wall", COLORS.wall, 0xb2b8aa, 1, "wall", 2, 1));
     wall.position.set(x, 45, z);
     wall.castShadow = true;
     wall.receiveShadow = true;
@@ -251,20 +343,20 @@ class OfficeEscapeGame {
   }
 
   private addDesk(x: number, z: number, width: number, depth: number, height: number, color: number) {
-    const top = this.box(width, height, depth, color, 1);
+    const top = this.texturedBox(width, height, depth, this.surfaceMaterial(`desk-${color.toString(16)}`, color, 0xd4a15f, 1, "wood", 3, 1));
     top.position.set(x, height / 2, z);
     top.castShadow = true;
     top.receiveShadow = true;
     this.scene.add(top);
     this.navigation.addObstacle(x, z, width, depth);
 
-    const highlight = this.box(width * 0.44, 3, depth * 0.12, 0xffffff, 0.18);
+    const highlight = this.box(width * 0.44, 3, depth * 0.12, 0xffe0a3, 0.26);
     highlight.position.set(x - width * 0.18, height + 2, z - depth * 0.22);
     this.scene.add(highlight);
   }
 
   private addCoffeeMachine(x: number, z: number) {
-    this.addDesk(x, z, 94, 94, 72, 0x4f7658);
+    this.addDesk(x, z, 94, 94, 72, 0x9b6739);
     const screen = this.box(48, 4, 28, 0x111816, 1);
     screen.position.set(x, 74, z - 48);
     this.scene.add(screen);
@@ -277,12 +369,13 @@ class OfficeEscapeGame {
     this.addWall(700, 1425, 24, 260);
     this.addWall(540, 1555, 344, 24);
 
-    const lintel = this.box(320, 24, 28, COLORS.elevatorClosed, 1);
+    const elevatorMetal = this.surfaceMaterial("elevator-metal", COLORS.elevatorClosed, 0xaeb7c0, 1, "metal", 2, 1);
+    const lintel = this.texturedBox(320, 24, 28, elevatorMetal);
     lintel.position.set(540, 80, 1295);
     this.scene.add(lintel);
 
-    const leftDoor = this.box(124, 68, 18, COLORS.elevatorClosed, 1);
-    const rightDoor = this.box(124, 68, 18, COLORS.elevatorClosed, 1);
+    const leftDoor = this.texturedBox(124, 68, 18, elevatorMetal);
+    const rightDoor = this.texturedBox(124, 68, 18, elevatorMetal);
     leftDoor.position.set(478, 34, 1295);
     rightDoor.position.set(602, 34, 1295);
     this.elevatorDoors = [leftDoor, rightDoor];
@@ -309,7 +402,7 @@ class OfficeEscapeGame {
     ];
 
     for (const [x, z] of chairs) {
-      const chair = this.box(34, 32, 34, 0x38424b, 1);
+      const chair = this.texturedBox(34, 32, 34, this.surfaceMaterial("chair-fabric", 0x38424b, 0x6f7d86, 1, "carpet", 1, 1));
       chair.position.set(x, 16, z);
       chair.castShadow = true;
       chair.receiveShadow = true;
@@ -318,8 +411,402 @@ class OfficeEscapeGame {
     }
   }
 
+  private addSceneDressing() {
+    this.addZonePanel(270, 840, 430, 370, 0x1d4f5c, 0.16);
+    this.addZonePanel(270, 280, 410, 360, 0x5f4971, 0.14);
+    this.addZonePanel(810, 280, 420, 360, 0x6b3f2e, 0.14);
+    this.addZonePanel(810, 840, 410, 350, 0x315f3e, 0.15);
+    this.addZonePanel(540, 1420, 470, 270, 0x334b62, 0.16);
+
+    this.addFloorLabel(270, 610, "WORK", 0x8bdff2, 0.42);
+    this.addFloorLabel(270, 95, "MEET", 0xd9b6ff, 0.38);
+    this.addFloorLabel(810, 95, "BOSS", 0xffc08a, 0.4);
+    this.addFloorLabel(840, 610, "SUPPLY", 0xa7f3c0, 0.36);
+    this.addFloorLabel(540, 1320, "EXIT", 0xbdefff, 0.5);
+
+    this.addGuideLine([
+      [270, 840],
+      [510, 1080],
+      [540, 1320],
+      [540, 1440],
+    ], 0xffd166, 0.48);
+    this.addGuideArrow(540, 1270, 0, 0xffd166);
+    this.addGuideArrow(540, 1388, 0, 0xbdefff);
+
+    this.addWorkstationDetails();
+    this.addMeetingRoomDetails();
+    this.addBossOfficeDetails();
+    this.addSupplyRoomDetails();
+    this.addElevatorDetails();
+
+    this.addLightStrip(160, 560, 190, Math.PI / 2, 0xffdf91);
+    this.addLightStrip(890, 560, 170, Math.PI / 2, 0xbdefff);
+    this.addLightStrip(540, 1294, 260, 0, 0xc8f7ff);
+
+    this.addFilingCabinet(105, 315, 0x4e6571);
+    this.addFilingCabinet(930, 210, 0x566251);
+    this.addFilingCabinet(792, 1000, 0x425b44);
+
+    this.addCrateStack(120, 1320, 0.15);
+    this.addCrateStack(895, 1200, -0.25);
+    this.addCrateStack(735, 440, 0.7);
+
+    this.addPottedPlant(70, 650);
+    this.addPottedPlant(1000, 1080);
+    this.addPottedPlant(420, 170);
+
+    this.addCableCoil(660, 1040);
+    this.addCableCoil(420, 1220);
+    this.addPaperScatter(200, 860, 8);
+    this.addPaperScatter(860, 360, 9);
+    this.addPaperScatter(480, 1460, 11);
+  }
+
+  private addZonePanel(x: number, z: number, width: number, depth: number, color: number, opacity: number) {
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, depth),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }),
+    );
+    panel.rotation.x = -Math.PI / 2;
+    panel.position.set(x, 7.8, z);
+    panel.renderOrder = 1;
+    this.scene.add(panel);
+  }
+
+  private addFloorLabel(x: number, z: number, text: string, color: number, opacity: number) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 96;
+    const context = canvas.getContext("2d")!;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.font = "800 50px Arial";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillStyle = `#${new THREE.Color(color).getHexString()}`;
+    context.globalAlpha = opacity;
+    context.fillText(text, canvas.width / 2, canvas.height / 2 + 4);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(
+      new THREE.PlaneGeometry(150, 56),
+      new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthWrite: false }),
+    );
+    label.rotation.x = -Math.PI / 2;
+    label.position.set(x, 8.5, z);
+    label.renderOrder = 3;
+    this.scene.add(label);
+  }
+
+  private addGuideLine(points: [number, number][], color: number, opacity: number) {
+    for (let index = 0; index < points.length - 1; index += 1) {
+      const [startX, startZ] = points[index];
+      const [endX, endZ] = points[index + 1];
+      this.addGuideSegment(startX, startZ, endX, endZ, 10, color, opacity);
+    }
+  }
+
+  private addGuideSegment(startX: number, startZ: number, endX: number, endZ: number, width: number, color: number, opacity: number) {
+    const deltaX = endX - startX;
+    const deltaZ = endZ - startZ;
+    const length = Math.hypot(deltaX, deltaZ);
+    const segment = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, length),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }),
+    );
+    segment.rotation.x = -Math.PI / 2;
+    segment.rotation.z = -Math.atan2(deltaX, deltaZ);
+    segment.position.set((startX + endX) / 2, 9, (startZ + endZ) / 2);
+    segment.renderOrder = 4;
+    this.scene.add(segment);
+  }
+
+  private addGuideArrow(x: number, z: number, rotationY: number, color: number) {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, -28);
+    shape.lineTo(24, 24);
+    shape.lineTo(7, 15);
+    shape.lineTo(7, 28);
+    shape.lineTo(-7, 28);
+    shape.lineTo(-7, 15);
+    shape.lineTo(-24, 24);
+    shape.lineTo(0, -28);
+    const arrow = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.68, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.rotation.z = rotationY;
+    arrow.position.set(x, 9.3, z);
+    arrow.renderOrder = 5;
+    this.scene.add(arrow);
+  }
+
+  private addWorkstationDetails() {
+    this.addComputerSet(185, 740, 0, 0x7dd3fc);
+    this.addComputerSet(320, 760, 0, 0x7dd3fc);
+    this.addComputerSet(185, 915, Math.PI, 0x38bdf8);
+    this.addComputerSet(330, 925, Math.PI, 0x38bdf8);
+    this.addCableTrail(190, 820, 330, 870);
+    this.addWallMarker(88, 840, Math.PI / 2, 0x7dd3fc);
+  }
+
+  private addMeetingRoomDetails() {
+    this.addWhiteboard(70, 270, Math.PI / 2);
+    this.addProjector(270, 505);
+    this.addFloorDecal(270, 280, 92, 0x1f172a, 0.22);
+    this.addComputerSet(270, 250, 0, 0xd9b6ff);
+    this.addPaperScatter(215, 350, 7);
+    this.addPaperScatter(335, 240, 6);
+  }
+
+  private addBossOfficeDetails() {
+    this.addZonePanel(820, 265, 330, 190, 0x4a2516, 0.2);
+    this.addComputerSet(820, 220, 0, 0xffb86b);
+    this.addDeskLamp(910, 245, 0xffd27a);
+    this.addWallMarker(1030, 280, -Math.PI / 2, 0xffb86b);
+    this.addBookShelf(1000, 430, 0);
+    this.addPaperScatter(760, 345, 8);
+  }
+
+  private addSupplyRoomDetails() {
+    this.addSupplyPad(450, 1000, 0x32d583);
+    this.addSupplyPad(950, 450, 0x32d583);
+    this.addVendingMachine(990, 820);
+    this.addFloorDecal(810, 840, 70, 0x10351f, 0.22);
+    this.addWallMarker(1030, 850, -Math.PI / 2, 0xa7f3c0);
+  }
+
+  private addElevatorDetails() {
+    this.addGuideSegment(420, 1370, 660, 1370, 8, 0xbdefff, 0.46);
+    this.addGuideSegment(420, 1512, 660, 1512, 8, 0xbdefff, 0.46);
+    this.addGuideSegment(420, 1370, 420, 1512, 8, 0xbdefff, 0.46);
+    this.addGuideSegment(660, 1370, 660, 1512, 8, 0xbdefff, 0.46);
+    this.addHazardStripes(540, 1305, 260);
+    this.addWallMarker(540, 1585, Math.PI, 0xbdefff);
+  }
+
+  private addComputerSet(x: number, z: number, rotationY: number, glowColor: number) {
+    const group = new THREE.Group();
+    const monitor = this.mesh(new THREE.BoxGeometry(38, 24, 5), 0x0c1114);
+    monitor.position.set(0, 28, -2);
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(30, 16),
+      new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.62, depthWrite: false }),
+    );
+    screen.position.set(0, 28, -5.2);
+    const stand = this.mesh(new THREE.BoxGeometry(6, 14, 6), 0x232d32);
+    stand.position.set(0, 14, 0);
+    const keyboard = this.mesh(new THREE.BoxGeometry(36, 3, 13), 0x151b1f);
+    keyboard.position.set(0, 7, 24);
+    group.add(monitor, screen, stand, keyboard);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+  }
+
+  private addCableTrail(startX: number, startZ: number, endX: number, endZ: number) {
+    this.addGuideSegment(startX, startZ, endX, endZ, 5, 0x101718, 0.58);
+    this.addGuideSegment(startX + 36, startZ - 24, endX + 10, endZ + 34, 4, 0x101718, 0.42);
+  }
+
+  private addWhiteboard(x: number, z: number, rotationY: number) {
+    const group = new THREE.Group();
+    const board = this.mesh(new THREE.BoxGeometry(8, 58, 142), 0xe8ead9);
+    board.position.y = 62;
+    const markerLine = this.mesh(new THREE.BoxGeometry(9, 3, 96), 0x60a5fa);
+    markerLine.position.set(-5, 74, -6);
+    const tray = this.mesh(new THREE.BoxGeometry(10, 5, 118), 0x737b86);
+    tray.position.set(-5, 34, 0);
+    group.add(board, markerLine, tray);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+  }
+
+  private addProjector(x: number, z: number) {
+    const projector = this.mesh(new THREE.BoxGeometry(44, 18, 30), 0x2c3438);
+    projector.position.set(x, 72, z);
+    this.scene.add(projector);
+    const light = new THREE.SpotLight(0xd9b6ff, 0.72, 250, 0.5, 0.5, 1.8);
+    light.position.set(x, 74, z);
+    light.target.position.set(x, 40, z - 120);
+    this.scene.add(light, light.target);
+  }
+
+  private addDeskLamp(x: number, z: number, color: number) {
+    const base = this.mesh(new THREE.CylinderGeometry(7, 9, 5, 8), 0x352113);
+    base.position.set(x, 58, z);
+    const shade = this.mesh(new THREE.ConeGeometry(16, 18, 10), color);
+    shade.position.set(x, 75, z);
+    shade.rotation.x = Math.PI;
+    this.scene.add(base, shade);
+    const light = new THREE.PointLight(color, 0.52, 160, 1.9);
+    light.position.set(x, 72, z);
+    this.scene.add(light);
+  }
+
+  private addBookShelf(x: number, z: number, rotationY: number) {
+    const group = new THREE.Group();
+    const shelf = this.texturedBox(126, 80, 22, this.surfaceMaterial("bookshelf", 0x5a3b22, 0xb08455, 1, "wood", 2, 1));
+    shelf.position.y = 40;
+    group.add(shelf);
+    for (let index = 0; index < 9; index += 1) {
+      const book = this.box(8, 34 + (index % 3) * 5, 14, index % 2 === 0 ? 0xffd166 : 0x60a5fa, 1);
+      book.position.set(-48 + index * 12, 48, -13);
+      group.add(book);
+    }
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+  }
+
+  private addSupplyPad(x: number, z: number, color: number) {
+    this.addFloorDecal(x, z, 48, color, 0.18);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(36, 42, 28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 9.4, z);
+    ring.renderOrder = 5;
+    this.scene.add(ring);
+  }
+
+  private addVendingMachine(x: number, z: number) {
+    const body = this.texturedBox(50, 92, 34, this.surfaceMaterial("vending", 0x1f5132, 0x8ff0a4, 1, "plastic", 1, 2));
+    body.position.set(x, 46, z);
+    const panel = new THREE.Mesh(
+      new THREE.PlaneGeometry(28, 46),
+      new THREE.MeshBasicMaterial({ color: 0xa7f3c0, transparent: true, opacity: 0.5, depthWrite: false }),
+    );
+    panel.position.set(x, 54, z - 17.4);
+    this.scene.add(body, panel);
+  }
+
+  private addHazardStripes(x: number, z: number, width: number) {
+    for (let index = 0; index < 9; index += 1) {
+      const stripe = new THREE.Mesh(
+        new THREE.PlaneGeometry(9, 42),
+        new THREE.MeshBasicMaterial({ color: index % 2 === 0 ? 0xffd166 : 0x111816, transparent: true, opacity: 0.62, depthWrite: false }),
+      );
+      stripe.rotation.x = -Math.PI / 2;
+      stripe.rotation.z = -0.68;
+      stripe.position.set(x - width / 2 + 34 + index * 24, 9.2, z);
+      stripe.renderOrder = 5;
+      this.scene.add(stripe);
+    }
+  }
+
+  private addWallMarker(x: number, z: number, rotationY: number, color: number) {
+    const group = new THREE.Group();
+    const frame = this.mesh(new THREE.BoxGeometry(72, 38, 5), 0x111816);
+    frame.position.y = 66;
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(58, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthWrite: false }),
+    );
+    glow.position.set(0, 66, -3);
+    group.add(frame, glow);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+  }
+
+  private addLightStrip(x: number, z: number, length: number, rotationY: number, color: number) {
+    const group = new THREE.Group();
+    const rail = this.mesh(new THREE.BoxGeometry(length, 5, 8), 0x1b2425);
+    const glow = new THREE.Mesh(
+      new THREE.BoxGeometry(length * 0.86, 3, 4),
+      new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 1.35,
+        roughness: 0.38,
+        metalness: 0.05,
+      }),
+    );
+    rail.position.y = 92;
+    glow.position.y = 96;
+    group.add(rail, glow);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+
+    const light = new THREE.PointLight(color, 0.55, 260, 1.75);
+    light.position.set(x, 112, z);
+    this.scene.add(light);
+  }
+
+  private addFilingCabinet(x: number, z: number, color: number) {
+    const cabinet = this.texturedBox(52, 76, 42, this.surfaceMaterial(`cabinet-${color.toString(16)}`, color, 0x9ba69d, 1, "metal", 1, 2));
+    cabinet.position.set(x, 38, z);
+    cabinet.castShadow = true;
+    cabinet.receiveShadow = true;
+    this.scene.add(cabinet);
+    this.navigation.addObstacle(x, z, 52, 42);
+
+    for (let index = 0; index < 3; index += 1) {
+      const handle = this.box(28, 3, 4, 0xd8d4c8, 1);
+      handle.position.set(x, 24 + index * 19, z - 23);
+      this.scene.add(handle);
+    }
+  }
+
+  private addCrateStack(x: number, z: number, rotationY: number) {
+    const group = new THREE.Group();
+    const crateMaterial = this.surfaceMaterial("dark-crate", 0x6f5632, 0xc28a4f, 1, "wood", 2, 1);
+    const first = this.texturedBox(72, 42, 48, crateMaterial);
+    const second = this.texturedBox(50, 34, 42, crateMaterial);
+    const band = this.box(76, 4, 7, 0x202828, 1);
+    first.position.set(0, 21, 0);
+    second.position.set(11, 59, -3);
+    band.position.set(0, 45, -25);
+    group.add(first, second, band);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    this.scene.add(group);
+    this.navigation.addObstacle(x, z, 84, 58);
+  }
+
+  private addPottedPlant(x: number, z: number) {
+    const group = new THREE.Group();
+    const pot = this.mesh(new THREE.CylinderGeometry(14, 18, 24, 8), 0x6b3f2e);
+    pot.position.y = 12;
+    for (let index = 0; index < 5; index += 1) {
+      const leaf = this.mesh(new THREE.ConeGeometry(8, 42, 6), 0x4f8f5f);
+      const angle = (index / 5) * Math.PI * 2;
+      leaf.position.set(Math.cos(angle) * 8, 42, Math.sin(angle) * 8);
+      leaf.rotation.z = Math.cos(angle) * 0.45;
+      leaf.rotation.x = Math.sin(angle) * 0.45;
+      group.add(leaf);
+    }
+    group.add(pot);
+    group.position.set(x, 0, z);
+    this.scene.add(group);
+  }
+
+  private addCableCoil(x: number, z: number) {
+    const coil = this.mesh(new THREE.TorusGeometry(24, 4, 8, 28), 0x181f21);
+    coil.position.set(x, 7, z);
+    coil.rotation.x = Math.PI / 2;
+    this.scene.add(coil);
+  }
+
+  private addPaperScatter(x: number, z: number, count: number) {
+    const material = this.surfaceMaterial("loose-paper", 0xd8d0b6, 0x8f8468, 0.82, "paper", 1, 1);
+    for (let index = 0; index < count; index += 1) {
+      const paper = new THREE.Mesh(new THREE.PlaneGeometry(20, 14), material);
+      paper.rotation.x = -Math.PI / 2;
+      paper.rotation.z = (index * 0.83) % Math.PI;
+      paper.position.set(x + ((index * 37) % 94) - 47, 8.4, z + ((index * 53) % 76) - 38);
+      paper.receiveShadow = true;
+      this.scene.add(paper);
+    }
+  }
+
   private addFloorNoise() {
-    const material = new THREE.MeshStandardMaterial({ color: 0x9ba69d, transparent: true, opacity: 0.22, roughness: 1 });
+    const material = new THREE.MeshStandardMaterial({ color: 0xaeb7a9, transparent: true, opacity: 0.2, roughness: 1 });
     const geometry = new THREE.BoxGeometry(6, 1, 3);
     for (let i = 0; i < 180; i += 1) {
       const mark = new THREE.Mesh(geometry, material);
@@ -327,21 +814,51 @@ class OfficeEscapeGame {
       mark.rotation.y = (i % 8) * 0.31;
       this.scene.add(mark);
     }
+
+    for (let i = 0; i < 30; i += 1) {
+      this.addFloorDecal(
+        ((i * 193) % (MAP.width - 130)) + 65,
+        ((i * 281) % (MAP.depth - 150)) + 75,
+        THREE.MathUtils.randFloat(18, 42),
+        i % 3 === 0 ? 0x0c1110 : 0x596158,
+        i % 3 === 0 ? 0.18 : 0.12,
+      );
+    }
   }
 
   private createPlayer() {
     this.player = new THREE.Group();
-    const body = this.mesh(new THREE.CylinderGeometry(18, 22, 42, 10), COLORS.player);
-    body.position.y = 30;
-    const head = this.mesh(new THREE.SphereGeometry(15, 12, 10), 0xf2c9a8);
-    head.position.y = 62;
-    const bag = this.mesh(new THREE.BoxGeometry(28, 18, 16), COLORS.playerAccent);
-    bag.position.set(-2, 26, -16);
-    const weaponBody = this.mesh(new THREE.BoxGeometry(11, 11, 42), COLORS.weapon);
-    weaponBody.position.set(13, 39, 25);
-    const weaponStock = this.mesh(new THREE.BoxGeometry(9, 16, 18), 0x59636b);
-    weaponStock.position.set(13, 36, 2);
-    this.player.add(body, head, bag, weaponBody, weaponStock);
+
+    const spriteTexture = this.textureLoader.load(PLAYER_SPRITE_URL);
+    spriteTexture.colorSpace = THREE.SRGBColorSpace;
+    spriteTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    spriteTexture.wrapS = THREE.ClampToEdgeWrapping;
+    spriteTexture.wrapT = THREE.ClampToEdgeWrapping;
+    spriteTexture.generateMipmaps = false;
+    spriteTexture.minFilter = THREE.LinearFilter;
+    spriteTexture.magFilter = THREE.LinearFilter;
+    this.playerSpriteTexture = spriteTexture;
+    this.setPlayerSpriteFrame("down", 0);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: spriteTexture,
+      transparent: true,
+      alphaTest: 0.05,
+      depthWrite: false,
+    }));
+    sprite.position.y = 58;
+    sprite.scale.set(PLAYER_SPRITE_WIDTH, PLAYER_SPRITE_HEIGHT, 1);
+    sprite.renderOrder = 12;
+
+    const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
+    muzzleAccent.position.set(16, 44, 83);
+    const selectionRing = new THREE.Mesh(
+      new THREE.RingGeometry(25, 32, 32),
+      new THREE.MeshBasicMaterial({ color: COLORS.playerAccent, transparent: true, opacity: 0.38, depthWrite: false }),
+    );
+    selectionRing.rotation.x = -Math.PI / 2;
+    selectionRing.position.y = 3;
+
+    this.player.add(sprite, muzzleAccent, selectionRing);
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.scene.add(this.player);
 
@@ -458,6 +975,7 @@ class OfficeEscapeGame {
     this.updateAmmoPickups(delta);
     this.updateAccessCard();
     this.updateEvacuation(delta);
+    this.updateObjectiveBeacons(delta);
     this.updateParticles(delta);
     this.updateShotEffects(delta);
     this.trySpawnEnemies();
@@ -483,8 +1001,66 @@ class OfficeEscapeGame {
     this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.player.rotation.y = Math.atan2(input.aimX, input.aimZ);
+    this.updatePlayerSprite(delta, input);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
     this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
+  }
+
+  private updatePlayerSprite(delta: number, input: InputState) {
+    const moving = Math.hypot(input.moveX, input.moveZ) > 0.08;
+    if (moving) {
+      this.playerSpriteDirection = this.getPlayerSpriteDirection(input.moveX, input.moveZ);
+      this.playerSpriteTimer += delta;
+      const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
+      while (this.playerSpriteTimer >= frameStep) {
+        this.playerSpriteTimer -= frameStep;
+        this.playerSpriteFrame = this.playerSpriteFrame >= 4 ? 1 : this.playerSpriteFrame + 1;
+      }
+    } else {
+      this.playerSpriteTimer = 0;
+      this.playerSpriteFrame = 0;
+    }
+
+    this.setPlayerSpriteFrame(this.playerSpriteDirection, this.playerSpriteFrame);
+  }
+
+  private getPlayerSpriteDirection(moveX: number, moveZ: number): PlayerSpriteDirection {
+    const origin = new THREE.Vector3(this.playerState.x, 0, this.playerState.z).project(this.camera);
+    const target = new THREE.Vector3(this.playerState.x + moveX * 100, 0, this.playerState.z + moveZ * 100).project(this.camera);
+    const screenX = target.x - origin.x;
+    const screenY = target.y - origin.y;
+    const angle = Math.atan2(screenY, screenX);
+    const sector = this.wrapDirectionIndex(Math.round(angle / (Math.PI / 4)));
+    const currentIndex = PLAYER_SCREEN_DIRECTION_INDEX[this.playerSpriteDirection];
+    if (sector === currentIndex) return this.playerSpriteDirection;
+
+    const currentAngle = currentIndex * (Math.PI / 4);
+    const angleDelta = Math.abs(this.shortestAngleDelta(angle, currentAngle));
+    if (angleDelta < PLAYER_DIRECTION_HYSTERESIS) return this.playerSpriteDirection;
+    return PLAYER_SCREEN_DIRECTIONS[sector];
+  }
+
+  private wrapDirectionIndex(index: number) {
+    return (index + PLAYER_SCREEN_DIRECTIONS.length) % PLAYER_SCREEN_DIRECTIONS.length;
+  }
+
+  private shortestAngleDelta(angle: number, target: number) {
+    return Math.atan2(Math.sin(angle - target), Math.cos(angle - target));
+  }
+
+  private setPlayerSpriteFrame(direction: PlayerSpriteDirection, frame: number) {
+    if (!this.playerSpriteTexture) return;
+    const column = THREE.MathUtils.clamp(Math.floor(frame), 0, PLAYER_SPRITE_COLUMNS - 1);
+    const row = PLAYER_DIRECTION_ROW[direction];
+    const cellWidth = 1 / PLAYER_SPRITE_COLUMNS;
+    const cellHeight = 1 / PLAYER_SPRITE_ROWS;
+    const insetX = PLAYER_SPRITE_UV_INSET_PIXELS / PLAYER_SPRITE_SOURCE_WIDTH;
+    const insetY = PLAYER_SPRITE_UV_INSET_PIXELS / PLAYER_SPRITE_SOURCE_HEIGHT;
+    this.playerSpriteTexture.repeat.set(cellWidth - insetX * 2, cellHeight - insetY * 2);
+    this.playerSpriteTexture.offset.set(
+      column * cellWidth + insetX,
+      1 - (row + 1) * cellHeight + insetY,
+    );
   }
 
   private updateTimeline() {
@@ -504,11 +1080,13 @@ class OfficeEscapeGame {
       this.elevatorDoors[1].position.x = 664;
       for (const door of this.elevatorDoors) this.setMeshColor(door, COLORS.elevatorOpen);
       this.setMeshColor(this.elevatorZone, COLORS.elevatorOpen, 0.5);
+      this.elevatorBeacon = this.createObjectiveBeacon(540, 1440, 0x7dd3fc, 56);
       this.showHint("电梯开放！快去下班！");
     }
     if (!this.bossSpawned && this.elapsed >= 90) {
       this.bossSpawned = true;
       this.spawnBoss();
+      this.showAlert("老板来了，立即撤离");
       this.showHint("老板来了！快跑！");
     }
   }
@@ -557,34 +1135,37 @@ class OfficeEscapeGame {
 
   private spawnBoss() {
     this.createEnemy("boss", 820, 430);
+    this.bossAlertBeacon = this.createObjectiveBeacon(820, 430, 0xff4b2f, 74);
   }
 
   private createEnemy(kind: EnemyKind, x: number, z: number) {
     const config = ENEMY_CONFIG[kind];
     const group = new THREE.Group();
-    const body = this.mesh(new THREE.CylinderGeometry(config.radius, config.radius * 1.08, config.height, kind === "boss" ? 12 : 8), config.color);
-    body.position.y = config.height / 2;
-    group.add(body);
+    const healthBarWidth = kind === "boss" ? 86 : 48;
+    const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
+    const healthFill = healthBar.children[1] as THREE.Mesh;
+
     if (kind === "boss") {
-      const head = this.mesh(new THREE.SphereGeometry(18, 12, 10), 0xf2c9a8);
-      head.position.y = config.height + 16;
-      group.add(head);
+      this.addBossModel(group, config);
+    } else if (kind === "bug") {
+      this.addBugModel(group, config);
     } else if (kind === "changeRequest") {
-      group.add(this.mesh(new THREE.BoxGeometry(22, 18, 12), 0xdbeafe));
-      group.children[1].position.y = config.height + 6;
+      this.addChangeRequestModel(group, config);
     } else if (kind === "meeting") {
-      const halo = this.mesh(new THREE.TorusGeometry(config.radius * 0.9, 3, 6, 16), 0xe9d5ff);
-      halo.position.y = config.height + 5;
-      halo.rotation.x = Math.PI / 2;
-      group.add(halo);
+      this.addMeetingModel(group, config);
     }
+
     group.position.set(x, 0, z);
+    healthBar.position.set(x, config.height + (kind === "boss" ? 58 : 28), z);
     this.scene.add(group);
+    this.scene.add(healthBar);
 
     this.enemies.push({
       id: this.nextEnemyId,
       kind,
       group,
+      healthBar,
+      healthFill,
       radius: config.radius,
       hp: config.hp,
       maxHp: config.hp,
@@ -593,13 +1174,157 @@ class OfficeEscapeGame {
       expReward: config.expReward,
       contactCooldown: config.contactCooldown,
       nextHitAt: 0,
+      hitFlashUntil: 0,
+      hitFlashActive: false,
       surroundAngle: Math.random() * Math.PI * 2,
       surroundRadius: kind === "boss" ? 0 : THREE.MathUtils.randFloat(34, 118),
+      separationX: 0,
+      separationZ: 0,
     });
     this.nextEnemyId += 1;
   }
 
+  private addBugModel(group: THREE.Group, config: EnemyConfig) {
+    const hide = this.characterInstanceMaterial("oxHide");
+    const body = this.meshWithMaterial(new THREE.CylinderGeometry(config.radius * 0.98, config.radius * 1.18, config.height, 18), hide);
+    body.position.y = config.height / 2;
+    const head = this.meshWithMaterial(new THREE.SphereGeometry(config.radius * 0.78, 18, 12), hide);
+    head.position.set(0, config.height + 8, 6);
+    const snout = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xffb4a8);
+    snout.scale.set(9, 4.5, 5);
+    snout.position.set(0, config.height + 5, 16);
+    const leftHorn = this.mesh(new THREE.ConeGeometry(4, 18, 10), 0xf6e6c2);
+    leftHorn.position.set(-13, config.height + 14, 2);
+    leftHorn.rotation.z = Math.PI / 2.45;
+    const rightHorn = leftHorn.clone();
+    rightHorn.position.x = 13;
+    rightHorn.rotation.z = -Math.PI / 2.45;
+    const badge = this.mesh(new THREE.BoxGeometry(18, 12, 4), 0xffd166);
+    badge.position.set(0, config.height * 0.56, 15);
+    const pack = this.mesh(new THREE.BoxGeometry(24, 14, 13), 0x4a1714);
+    pack.position.set(0, config.height * 0.48, -14);
+    group.add(body, head, snout, leftHorn, rightHorn, badge, pack);
+  }
+
+  private addChangeRequestModel(group: THREE.Group, config: EnemyConfig) {
+    const hide = this.characterInstanceMaterial("horseHide");
+    const body = this.meshWithMaterial(new THREE.CapsuleGeometry(14, config.height - 18, 6, 16), hide);
+    body.scale.z = 0.82;
+    body.position.y = config.height / 2;
+    const head = this.meshWithMaterial(new THREE.SphereGeometry(1, 18, 12), hide);
+    head.scale.set(10, 13, 8.5);
+    head.position.set(0, config.height + 13, 7);
+    const muzzle = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xbfd9ff);
+    muzzle.scale.set(8, 4.5, 7);
+    muzzle.position.set(0, config.height + 8, 21);
+    const mane = this.mesh(new THREE.BoxGeometry(7, 32, 8), 0x10243a);
+    mane.position.set(0, config.height + 10, -4);
+    const leftEar = this.mesh(new THREE.ConeGeometry(4, 15, 10), 0x9bc8ff);
+    leftEar.position.set(-8, config.height + 30, 1);
+    leftEar.rotation.z = 0.28;
+    const rightEar = leftEar.clone();
+    rightEar.position.x = 8;
+    rightEar.rotation.z = -0.28;
+    const visor = this.mesh(new THREE.BoxGeometry(25, 7, 5), 0xdbeafe);
+    visor.position.set(0, config.height + 16, 16);
+    const shoulderLeft = this.mesh(new THREE.BoxGeometry(9, 18, 18), 0x1e3a8a);
+    shoulderLeft.position.set(-22, 35, 0);
+    const shoulderRight = shoulderLeft.clone();
+    shoulderRight.position.x = 22;
+    group.add(body, head, muzzle, mane, leftEar, rightEar, visor, shoulderLeft, shoulderRight);
+  }
+
+  private addMeetingModel(group: THREE.Group, config: EnemyConfig) {
+    const hide = this.characterInstanceMaterial("meetingHide");
+    const body = this.meshWithMaterial(new THREE.CylinderGeometry(config.radius * 1.08, config.radius * 1.12, config.height, 20), hide);
+    body.position.y = config.height / 2;
+    const head = this.meshWithMaterial(new THREE.SphereGeometry(1, 18, 12), hide);
+    head.scale.set(12, 11, 9);
+    head.position.set(0, config.height + 10, 7);
+    const muzzle = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xf5d0fe);
+    muzzle.scale.set(10, 4, 6);
+    muzzle.position.set(0, config.height + 7, 20);
+    const leftEar = this.mesh(new THREE.ConeGeometry(4, 13, 10), 0xe9d5ff);
+    leftEar.position.set(-10, config.height + 24, 0);
+    leftEar.rotation.z = 0.42;
+    const rightEar = leftEar.clone();
+    rightEar.position.x = 10;
+    rightEar.rotation.z = -0.42;
+    const halo = this.mesh(new THREE.TorusGeometry(config.radius * 1.15, 3, 8, 32), 0xe9d5ff);
+    halo.position.y = config.height + 18;
+    halo.rotation.x = Math.PI / 2;
+    const minutes = this.mesh(new THREE.BoxGeometry(30, 18, 5), 0xffffff, 0.72);
+    minutes.position.set(0, config.height * 0.52, 16);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(config.radius * 1.2, config.radius * 1.55, 24),
+      new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.32, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 6;
+    group.add(body, head, muzzle, leftEar, rightEar, halo, minutes, ring);
+  }
+
+  private addBossModel(group: THREE.Group, config: EnemyConfig) {
+    const hide = this.characterInstanceMaterial("bossBull");
+    const body = this.meshWithMaterial(new THREE.CylinderGeometry(config.radius * 0.98, config.radius * 1.24, config.height, 24), hide);
+    body.position.y = config.height / 2;
+    const coat = this.mesh(new THREE.BoxGeometry(54, 58, 18), 0x4a2d16);
+    coat.position.set(0, 49, 12);
+    const head = this.meshWithMaterial(new THREE.SphereGeometry(22, 24, 16), hide);
+    head.position.set(0, config.height + 18, 4);
+    const snout = this.mesh(new THREE.SphereGeometry(1, 16, 10), 0xd08a4c);
+    snout.scale.set(14, 6, 8);
+    snout.position.set(0, config.height + 13, 22);
+    const leftHorn = this.mesh(new THREE.ConeGeometry(6, 32, 12), 0xf6e6c2);
+    leftHorn.position.set(-22, config.height + 25, 0);
+    leftHorn.rotation.z = Math.PI / 2.25;
+    const rightHorn = leftHorn.clone();
+    rightHorn.position.x = 22;
+    rightHorn.rotation.z = -Math.PI / 2.25;
+    const crown = this.mesh(new THREE.BoxGeometry(42, 10, 28), 0x1f2933);
+    crown.position.y = config.height + 40;
+    const tie = this.mesh(new THREE.BoxGeometry(10, 30, 5), 0xffd166);
+    tie.position.set(0, 58, 24);
+    const briefcase = this.mesh(new THREE.BoxGeometry(18, 30, 28), 0x27170f);
+    briefcase.position.set(-43, 38, 4);
+    const rightArm = this.mesh(new THREE.BoxGeometry(13, 48, 13), 0x5a371c);
+    rightArm.position.set(42, 54, 10);
+    rightArm.rotation.x = -0.45;
+    const warning = new THREE.PointLight(0xff7a1a, 0.48, 210, 1.7);
+    warning.position.y = 84;
+    group.add(body, coat, head, snout, leftHorn, rightHorn, crown, tie, briefcase, rightArm, warning);
+  }
+
+  private createEnemyHealthBar(width: number, color: number) {
+    const group = new THREE.Group();
+    const background = new THREE.Mesh(
+      new THREE.PlaneGeometry(width + 7, 8),
+      new THREE.MeshBasicMaterial({ color: 0x070b0a, transparent: true, opacity: 0.82, depthWrite: false }),
+    );
+    const fill = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, 4.5),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false }),
+    );
+    const shine = new THREE.Mesh(
+      new THREE.PlaneGeometry(width, 1.4),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.32, depthWrite: false }),
+    );
+    fill.userData.width = width;
+    fill.position.z = 0.2;
+    shine.position.set(0, 1.1, 0.3);
+    group.add(background, fill, shine);
+    group.renderOrder = 40;
+    group.visible = false;
+    return group;
+  }
+
   private updateEnemies(delta: number) {
+    this.enemySeparationTimer -= delta;
+    if (this.enemySeparationTimer <= 0) {
+      this.recomputeEnemySeparation();
+      this.enemySeparationTimer = ENEMY_SEPARATION_INTERVAL;
+    }
+
     for (const enemy of this.enemies) {
       const playerDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
       const orbitAngle = enemy.surroundAngle + this.elapsed * 0.18;
@@ -610,9 +1335,8 @@ class OfficeEscapeGame {
       let moveZ = direction.z;
 
       if (enemy.kind !== "boss") {
-        const separation = this.getEnemySeparation(enemy);
-        moveX += separation.x * 1.6;
-        moveZ += separation.z * 1.6;
+        moveX += enemy.separationX * 1.6;
+        moveZ += enemy.separationZ * 1.6;
       }
 
       const length = Math.max(Math.hypot(moveX, moveZ), 0.001);
@@ -626,6 +1350,7 @@ class OfficeEscapeGame {
       enemy.group.position.x = nextPosition.x;
       enemy.group.position.z = nextPosition.z;
       enemy.group.rotation.y = Math.atan2(moveX, moveZ);
+      this.updateEnemyVisualState(enemy);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
       if (
@@ -646,22 +1371,66 @@ class OfficeEscapeGame {
     }
   }
 
-  private getEnemySeparation(enemy: Enemy) {
-    let x = 0;
-    let z = 0;
-    for (const other of this.enemies) {
-      if (other.id === enemy.id) continue;
-      const dx = enemy.group.position.x - other.group.position.x;
-      const dz = enemy.group.position.z - other.group.position.z;
-      const distance = Math.hypot(dx, dz);
-      const minDistance = enemy.radius + other.radius + 30;
-      if (distance > 0.001 && distance < minDistance) {
+  private recomputeEnemySeparation() {
+    for (const enemy of this.enemies) {
+      enemy.separationX = 0;
+      enemy.separationZ = 0;
+    }
+
+    for (let index = 0; index < this.enemies.length; index += 1) {
+      const enemy = this.enemies[index];
+      for (let otherIndex = index + 1; otherIndex < this.enemies.length; otherIndex += 1) {
+        const other = this.enemies[otherIndex];
+        const dx = enemy.group.position.x - other.group.position.x;
+        const dz = enemy.group.position.z - other.group.position.z;
+        const distanceSquared = dx * dx + dz * dz;
+        const minDistance = enemy.radius + other.radius + 30;
+        if (distanceSquared <= 0.000001 || distanceSquared >= minDistance * minDistance) continue;
+
+        const distance = Math.sqrt(distanceSquared);
         const strength = (minDistance - distance) / minDistance;
-        x += (dx / distance) * strength;
-        z += (dz / distance) * strength;
+        const pushX = (dx / distance) * strength;
+        const pushZ = (dz / distance) * strength;
+        if (enemy.kind !== "boss") {
+          enemy.separationX += pushX;
+          enemy.separationZ += pushZ;
+        }
+        if (other.kind !== "boss") {
+          other.separationX -= pushX;
+          other.separationZ -= pushZ;
+        }
       }
     }
-    return { x, z };
+  }
+
+  private updateEnemyVisualState(enemy: Enemy) {
+    const config = ENEMY_CONFIG[enemy.kind];
+    const barHeight = config.height + (enemy.kind === "boss" ? 58 : 28);
+    enemy.healthBar.position.set(enemy.group.position.x, barHeight, enemy.group.position.z);
+    enemy.healthBar.lookAt(this.camera.position);
+
+    const healthRatio = THREE.MathUtils.clamp(enemy.hp / enemy.maxHp, 0, 1);
+    const fillWidth = enemy.healthFill.userData.width as number;
+    enemy.healthFill.scale.x = healthRatio;
+    enemy.healthFill.position.x = -(fillWidth * (1 - healthRatio)) / 2;
+    const shine = enemy.healthBar.children[2];
+    shine.scale.x = healthRatio;
+    shine.position.x = enemy.healthFill.position.x;
+    enemy.healthBar.visible = enemy.kind === "boss" || enemy.hp < enemy.maxHp || this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z) < 360;
+
+    const hitAlpha = THREE.MathUtils.clamp((enemy.hitFlashUntil - this.elapsed) / 0.14, 0, 1);
+    enemy.group.scale.setScalar(1 + hitAlpha * 0.13);
+    if (hitAlpha <= 0 && !enemy.hitFlashActive) return;
+    enemy.hitFlashActive = hitAlpha > 0;
+    enemy.group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+        material.emissive.setHex(hitAlpha > 0 ? 0xfff1b8 : 0x000000);
+        material.emissiveIntensity = hitAlpha * 0.72;
+      }
+    });
   }
 
   private updateWeapon(input: InputState) {
@@ -735,11 +1504,20 @@ class OfficeEscapeGame {
 
   private disposeObject(root: THREE.Object3D) {
     this.scene.remove(root);
+    const disposedGeometries = new WeakSet<THREE.BufferGeometry>();
+    const disposedMaterials = new WeakSet<THREE.Material>();
     root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
-      object.geometry.dispose();
+      if (!disposedGeometries.has(object.geometry)) {
+        object.geometry.dispose();
+        disposedGeometries.add(object.geometry);
+      }
       const materials = Array.isArray(object.material) ? object.material : [object.material];
-      for (const material of materials) material.dispose();
+      for (const material of materials) {
+        if (material.userData.shared || disposedMaterials.has(material)) continue;
+        material.dispose();
+        disposedMaterials.add(material);
+      }
     });
   }
 
@@ -794,10 +1572,8 @@ class OfficeEscapeGame {
 
     for (const hit of trace.hits) {
       hit.target.hp -= request.damage;
-      hit.target.group.scale.setScalar(1.1);
-      window.setTimeout(() => {
-        if (hit.target.hp > 0) hit.target.group.scale.setScalar(1);
-      }, 65);
+      hit.target.hitFlashUntil = this.elapsed + 0.14;
+      this.updateEnemyVisualState(hit.target);
     }
 
     const endX = request.originX + request.directionX * trace.endDistance;
@@ -829,27 +1605,28 @@ class OfficeEscapeGame {
     const direction = new THREE.Vector3(endX - originX, 0, endZ - originZ);
     const distance = direction.length();
     if (distance < 0.001) {
-      if (impact) this.emitParticles(impact.x, 32, impact.z, impact.color, 4, 34);
+      if (impact) this.createImpactEffect(impact.x, impact.z, impact.color);
       return;
     }
     direction.normalize();
     const length = Math.max(8, Math.min(BULLET_VISUAL.length, distance * 0.72));
     const group = new THREE.Group();
     const glow = new THREE.Mesh(
-      new THREE.CapsuleGeometry(BULLET_VISUAL.radius, length, 4, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffc857, transparent: true, opacity: 0.42, depthWrite: false }),
+      new THREE.CapsuleGeometry(BULLET_VISUAL.radius * 1.45, length * 1.18, 4, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffb84d, transparent: true, opacity: 0.36, depthWrite: false }),
     );
     const core = new THREE.Mesh(
-      new THREE.CapsuleGeometry(BULLET_VISUAL.radius * 0.55, length * 0.62, 4, 8),
+      new THREE.CapsuleGeometry(BULLET_VISUAL.radius * 0.42, length * 0.72, 4, 8),
       new THREE.MeshStandardMaterial({
-        color: 0xffe7a3,
-        emissive: 0xffa000,
-        emissiveIntensity: 1.8,
+        color: 0xfff0b6,
+        emissive: 0xff8f00,
+        emissiveIntensity: 2.6,
         metalness: 0.5,
         roughness: 0.25,
       }),
     );
-    group.add(glow, core);
+    const light = new THREE.PointLight(0xffb84d, 0.35, 120, 2);
+    group.add(glow, core, light);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
     group.position.set(
       originX + direction.x * (length / 2),
@@ -872,7 +1649,7 @@ class OfficeEscapeGame {
       bullet.group.position.addScaledVector(bullet.direction, distance);
       bullet.remainingDistance -= distance;
       if (bullet.remainingDistance > 0.001) continue;
-      if (bullet.impact) this.emitParticles(bullet.impact.x, 32, bullet.impact.z, bullet.impact.color, 4, 34);
+      if (bullet.impact) this.createImpactEffect(bullet.impact.x, bullet.impact.z, bullet.impact.color);
       completed.push(bullet);
     }
     for (const bullet of completed) this.disposeObject(bullet.group);
@@ -880,28 +1657,73 @@ class OfficeEscapeGame {
   }
 
   private createMuzzleFlash(x: number, z: number) {
-    const flash = new THREE.Mesh(
-      new THREE.SphereGeometry(7, 6, 4),
-      new THREE.MeshBasicMaterial({ color: COLORS.muzzle, transparent: true, opacity: 1 }),
+    const flash = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xfff0a3, transparent: true, opacity: 1, depthWrite: false }),
     );
-    flash.position.set(x, 39, z);
+    const bloom = new THREE.Mesh(
+      new THREE.SphereGeometry(18, 10, 8),
+      new THREE.MeshBasicMaterial({ color: COLORS.muzzle, transparent: true, opacity: 0.34, depthWrite: false }),
+    );
+    const spark = new THREE.Mesh(
+      new THREE.ConeGeometry(9, 38, 8),
+      new THREE.MeshBasicMaterial({ color: 0xff9f1c, transparent: true, opacity: 0.82, depthWrite: false }),
+    );
+    spark.rotation.x = Math.PI / 2;
+    spark.position.z = 18;
+    const light = new THREE.PointLight(0xffbd55, 1.35, 165, 1.8);
+    flash.add(bloom, core, spark, light);
+    flash.position.set(x, 40, z);
+    flash.rotation.y = this.player.rotation.y;
     this.scene.add(flash);
-    this.shotEffects.push({ object: flash, life: 0.05, maxLife: 0.05 });
+    this.shotEffects.push({ object: flash, life: 0.075, maxLife: 0.075 });
   }
 
   private updateShotEffects(delta: number) {
     for (const effect of this.shotEffects) {
       effect.life -= delta;
       const opacity = Math.max(0, effect.life / effect.maxLife);
-      const object = effect.object as THREE.Mesh | THREE.Line;
-      const material = object.material as THREE.Material & { opacity: number };
-      material.opacity = opacity;
+      effect.object.scale.setScalar(0.72 + opacity * 0.6);
+      effect.object.traverse((object) => {
+        if (object instanceof THREE.PointLight) {
+          object.intensity *= opacity;
+          return;
+        }
+        if (!(object instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if ("opacity" in material) {
+            material.transparent = true;
+            material.opacity = opacity;
+          }
+        }
+      });
     }
     const expired = this.shotEffects.filter((effect) => effect.life <= 0);
     for (const effect of expired) {
       this.disposeObject(effect.object);
     }
     this.shotEffects = this.shotEffects.filter((effect) => effect.life > 0);
+  }
+
+  private createImpactEffect(x: number, z: number, color: number) {
+    this.emitParticles(x, 34, z, color, 7, 58);
+    this.emitParticles(x, 28, z, 0xffd166, 4, 38);
+    this.addFloorDecal(x, z, THREE.MathUtils.randFloat(10, 18), 0x080b0a, 0.22, true);
+
+    const flash = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(10, 18, 20),
+      new THREE.MeshBasicMaterial({ color: 0xffe6a3, transparent: true, opacity: 0.58, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    const light = new THREE.PointLight(0xffc65a, 0.65, 130, 1.8);
+    light.position.y = 18;
+    flash.add(ring, light);
+    flash.position.set(x, 9, z);
+    this.scene.add(flash);
+    this.shotEffects.push({ object: flash, life: 0.12, maxLife: 0.12 });
   }
 
   private removeDeadEnemies() {
@@ -913,7 +1735,12 @@ class OfficeEscapeGame {
         this.gainExp(enemy.expReward);
         this.showFloating(`+${enemy.expReward}`, "#9be7ff");
       }
-      this.scene.remove(enemy.group);
+      if (enemy.kind === "boss" && this.bossAlertBeacon) {
+        this.disposeObject(this.bossAlertBeacon);
+        this.bossAlertBeacon = undefined;
+      }
+      this.disposeObject(enemy.group);
+      this.disposeObject(enemy.healthBar);
     }
     if (dead.length > 0) this.enemies = this.enemies.filter((enemy) => enemy.hp > 0);
   }
@@ -1009,6 +1836,7 @@ class OfficeEscapeGame {
     this.accessCard.add(card, glow);
     this.accessCard.position.set(270, 0, 400);
     this.scene.add(this.accessCard);
+    this.accessCardBeacon = this.createObjectiveBeacon(270, 400, COLORS.accessCard, 46);
   }
 
   private updateAccessCard() {
@@ -1019,8 +1847,53 @@ class OfficeEscapeGame {
       this.hasAccessCard = true;
       this.scene.remove(this.accessCard);
       this.accessCard = undefined;
+      if (this.accessCardBeacon) {
+        this.disposeObject(this.accessCardBeacon);
+        this.accessCardBeacon = undefined;
+      }
       this.showHint(this.elevatorOpen ? "门禁卡已获得，快去电梯" : "门禁卡已获得，等待电梯开放");
       this.showFloating("门禁卡", "#fff5c2");
+    }
+  }
+
+  private createObjectiveBeacon(x: number, z: number, color: number, radius: number) {
+    const group = new THREE.Group();
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius * 0.28, radius * 0.52, 180, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    beam.position.y = 90;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.72, radius, 32),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, depthWrite: false }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 10;
+    const core = new THREE.Mesh(
+      new THREE.CircleGeometry(radius * 0.22, 24),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, depthWrite: false }),
+    );
+    core.rotation.x = -Math.PI / 2;
+    core.position.y = 10.2;
+    const light = new THREE.PointLight(color, 0.86, 260, 1.6);
+    light.position.y = 58;
+    group.add(beam, ring, core, light);
+    group.position.set(x, 0, z);
+    group.renderOrder = 12;
+    this.scene.add(group);
+    return group;
+  }
+
+  private updateObjectiveBeacons(delta: number) {
+    const time = this.elapsed * 2.4;
+    for (const beacon of [this.accessCardBeacon, this.elevatorBeacon, this.bossAlertBeacon]) {
+      if (!beacon) continue;
+      const pulse = 0.92 + Math.sin(time) * 0.08;
+      beacon.rotation.y += delta * 0.9;
+      beacon.children[1].scale.setScalar(pulse);
+      beacon.children[2].scale.setScalar(0.75 + Math.sin(time + 0.8) * 0.12);
+      const light = beacon.children[3];
+      if (light instanceof THREE.PointLight) light.intensity = 0.68 + Math.sin(time + 1.2) * 0.18;
     }
   }
 
@@ -1120,14 +1993,24 @@ class OfficeEscapeGame {
   }
 
   private emitParticles(x: number, y: number, z: number, color: number, count: number, spread: number) {
+    while (this.particles.length + count > MAX_ACTIVE_PARTICLES) {
+      const oldest = this.particles.shift();
+      if (oldest) this.disposeParticle(oldest);
+    }
+
     for (let i = 0; i < count; i += 1) {
-      const mesh = this.mesh(new THREE.SphereGeometry(THREE.MathUtils.randFloat(2, 5), 6, 4), color);
+      const mesh = new THREE.Mesh(
+        this.particleGeometry,
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false }),
+      );
+      const size = THREE.MathUtils.randFloat(2, 5);
+      mesh.scale.setScalar(size);
       mesh.position.set(x, y, z);
       const angle = Math.random() * Math.PI * 2;
       const speed = THREE.MathUtils.randFloat(spread * 0.8, spread * 1.4);
       const velocity = new THREE.Vector3(Math.cos(angle) * speed, THREE.MathUtils.randFloat(40, 120), Math.sin(angle) * speed);
       this.scene.add(mesh);
-      this.particles.push({ mesh, velocity, life: 0.45, maxLife: 0.45 });
+      this.particles.push({ mesh, velocity, size, life: 0.45, maxLife: 0.45 });
     }
   }
 
@@ -1139,12 +2022,18 @@ class OfficeEscapeGame {
       const alpha = Math.max(0, particle.life / particle.maxLife);
       const material = particle.mesh.material as THREE.MeshStandardMaterial;
       material.opacity = alpha;
-      particle.mesh.scale.setScalar(alpha);
+      particle.mesh.scale.setScalar(particle.size * alpha);
     }
 
     const expired = this.particles.filter((particle) => particle.life <= 0);
-    for (const particle of expired) this.scene.remove(particle.mesh);
+    for (const particle of expired) this.disposeParticle(particle);
     this.particles = this.particles.filter((particle) => particle.life > 0);
+  }
+
+  private disposeParticle(particle: Particle) {
+    this.scene.remove(particle.mesh);
+    const materials = Array.isArray(particle.mesh.material) ? particle.mesh.material : [particle.mesh.material];
+    for (const material of materials) material.dispose();
   }
 
   private showFloating(message: string, color: string) {
@@ -1163,6 +2052,12 @@ class OfficeEscapeGame {
     this.lastHintTimer = 2;
   }
 
+  private showAlert(message: string) {
+    this.bossAlertUntil = this.elapsed + 3.4;
+    this.hud.alert.textContent = message;
+    this.hud.alert.classList.add("is-visible");
+  }
+
   private refreshHud() {
     const remaining = Math.max(0, Math.ceil(GAME.duration - this.elapsed));
     this.hud.timer.textContent = `${remaining}`;
@@ -1177,6 +2072,39 @@ class OfficeEscapeGame {
     this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
+    this.hud.weaponPanel.classList.toggle("is-low-ammo", weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
+
+    const mission = this.getMissionStatus();
+    this.hud.missionTitle.textContent = mission.title;
+    this.hud.missionBody.textContent = mission.body;
+    this.hud.missionMeta.textContent = mission.meta;
+    this.hud.root.classList.toggle("is-low-health", this.playerState.hp / this.playerState.maxHp <= 0.28);
+    this.hud.alert.classList.toggle("is-visible", this.elapsed < this.bossAlertUntil);
+  }
+
+  private getMissionStatus() {
+    if (this.gameState === "success") {
+      return { title: "任务完成", body: "已成功撤离办公室", meta: "SAFE" };
+    }
+    if (this.gameState === "failed") {
+      return { title: "任务失败", body: "今日下班失败", meta: "FAILED" };
+    }
+    if (this.bossSpawned) {
+      return { title: "立即撤离", body: this.hasAccessCard ? "前往 EXIT 区域，坚持到进度完成" : "先拿门禁卡，再冲向电梯", meta: "BOSS" };
+    }
+    if (this.elevatorOpen && this.hasAccessCard) {
+      return { title: "前往电梯", body: "跟随地面路线进入 EXIT 区域", meta: "EXIT OPEN" };
+    }
+    if (this.elevatorOpen) {
+      return { title: "缺少门禁卡", body: "先取得黄色光柱处的门禁卡", meta: "CARD NEEDED" };
+    }
+    if (this.hasAccessCard) {
+      return { title: "等待电梯", body: `电梯将在 ${Math.max(0, Math.ceil(80 - this.elapsed))} 秒后开放`, meta: "HOLD" };
+    }
+    if (this.accessCard) {
+      return { title: "取得门禁卡", body: "前往黄色光柱处拾取门禁卡", meta: "CARD" };
+    }
+    return { title: "生存并清场", body: `门禁卡将在 ${Math.max(0, Math.ceil(35 - this.elapsed))} 秒后出现`, meta: "SURVIVE" };
   }
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
@@ -1218,11 +2146,25 @@ class OfficeEscapeGame {
     return this.mesh(new THREE.BoxGeometry(width, height, depth), color, opacity);
   }
 
+  private texturedBox(width: number, height: number, depth: number, material: THREE.Material) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
+  private meshWithMaterial(geometry: THREE.BufferGeometry, material: THREE.Material) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
+
   private mesh(geometry: THREE.BufferGeometry, color: number, opacity = 1) {
     const material = new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.78,
-      metalness: 0.03,
+      roughness: 0.72,
+      metalness: 0.04,
       transparent: opacity < 1,
       opacity,
     });
@@ -1230,6 +2172,365 @@ class OfficeEscapeGame {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     return mesh;
+  }
+
+  private characterMaterial(key: keyof typeof CHARACTER_TEXTURE_URLS, tint = 0xffffff, roughness = 0.78) {
+    const cacheKey = `character-${key}-${tint}-${roughness}`;
+    const cached = this.materialCache.get(cacheKey);
+    if (cached) return cached;
+
+    const texture = this.textureLoader.load(CHARACTER_TEXTURE_URLS[key]);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+
+    const material = new THREE.MeshStandardMaterial({
+      color: tint,
+      map: texture,
+      roughness,
+      metalness: 0.02,
+    });
+    material.userData.shared = true;
+    this.materialCache.set(cacheKey, material);
+    return material;
+  }
+
+  private characterInstanceMaterial(key: keyof typeof CHARACTER_TEXTURE_URLS, tint = 0xffffff, roughness = 0.78) {
+    const material = this.characterMaterial(key, tint, roughness).clone();
+    material.userData.shared = false;
+    return material;
+  }
+
+  private surfaceMaterial(
+    key: string,
+    color: number,
+    accent: number,
+    opacity: number,
+    style: SurfaceStyle = "concrete",
+    repeatX = 1,
+    repeatY = 1,
+  ) {
+    const cacheKey = `${key}-${color}-${accent}-${opacity}-${style}-${repeatX}-${repeatY}`;
+    const cached = this.materialCache.get(cacheKey);
+    if (cached) return cached;
+
+    const assetTexture = this.assetSurfaceTexture(style, repeatX, repeatY);
+    const texture = assetTexture ?? this.surfaceTexture(cacheKey, color, accent, style, repeatX, repeatY);
+    const material = new THREE.MeshStandardMaterial({
+      color: assetTexture ? this.surfaceTint(color) : 0xffffff,
+      map: texture,
+      roughness: style === "metal" ? 0.56 : style === "plastic" ? 0.62 : 0.88,
+      metalness: style === "metal" ? 0.34 : 0.02,
+      transparent: opacity < 1,
+      opacity,
+    });
+    material.userData.shared = true;
+    this.materialCache.set(cacheKey, material);
+    return material;
+  }
+
+  private assetSurfaceTexture(style: SurfaceStyle, repeatX: number, repeatY: number) {
+    const url = TEXTURE_URLS[style];
+    if (!url) return undefined;
+    const cacheKey = `asset-${style}-${repeatX}-${repeatY}`;
+    const cached = this.textureCache.get(cacheKey);
+    if (cached) return cached;
+
+    const texture = this.textureLoader.load(url);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(repeatX, repeatY);
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    this.textureCache.set(cacheKey, texture);
+    return texture;
+  }
+
+  private surfaceTint(color: number) {
+    return new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.34);
+  }
+
+  private surfaceTexture(key: string, color: number, accent: number, style: SurfaceStyle, repeatX: number, repeatY: number) {
+    const cached = this.textureCache.get(key);
+    if (cached) return cached;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext("2d")!;
+    const base = new THREE.Color(color);
+    const detail = new THREE.Color(accent);
+    const rng = this.seededRandom(key);
+
+    context.fillStyle = this.colorToCss(base);
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    this.drawSurfacePattern(context, base, detail, style, rng);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(repeatX, repeatY);
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    this.textureCache.set(key, texture);
+    return texture;
+  }
+
+  private drawSurfacePattern(
+    context: CanvasRenderingContext2D,
+    base: THREE.Color,
+    detail: THREE.Color,
+    style: SurfaceStyle,
+    rng: () => number,
+  ) {
+    if (style === "wood") {
+      this.drawWoodPattern(context, base, detail, rng);
+    } else if (style === "wall") {
+      this.drawWallPattern(context, base, detail, rng);
+    } else if (style === "metal") {
+      this.drawMetalPattern(context, base, detail, rng);
+    } else if (style === "tile") {
+      this.drawTilePattern(context, base, detail, rng);
+    } else if (style === "carpet") {
+      this.drawCarpetPattern(context, base, detail, rng);
+    } else if (style === "plastic") {
+      this.drawPlasticPattern(context, base, detail, rng);
+    } else if (style === "paper") {
+      this.drawPaperPattern(context, base, detail, rng);
+    } else {
+      this.drawConcretePattern(context, base, detail, rng);
+    }
+  }
+
+  private drawConcretePattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    this.drawSpeckles(context, base, detail, rng, 640, 0.1);
+    context.globalAlpha = 0.12;
+    context.strokeStyle = this.colorToCss(detail);
+    for (let line = 0; line < 14; line += 1) {
+      const x = rng() * 256;
+      const y = rng() * 256;
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x + rng() * 86 - 43, y + rng() * 24 - 12);
+      context.stroke();
+    }
+  }
+
+  private drawTilePattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    const tile = 64;
+    context.globalAlpha = 0.4;
+    context.strokeStyle = "rgba(8, 12, 10, 0.52)";
+    context.lineWidth = 3;
+    for (let position = 0; position <= 256; position += tile) {
+      context.beginPath();
+      context.moveTo(position, 0);
+      context.lineTo(position, 256);
+      context.moveTo(0, position);
+      context.lineTo(256, position);
+      context.stroke();
+    }
+    context.lineWidth = 1;
+    context.globalAlpha = 0.16;
+    context.strokeStyle = this.colorToCss(detail);
+    for (let position = tile / 2; position < 256; position += tile) {
+      context.beginPath();
+      context.moveTo(position, 0);
+      context.lineTo(position, 256);
+      context.moveTo(0, position);
+      context.lineTo(256, position);
+      context.stroke();
+    }
+    this.drawSpeckles(context, base, detail, rng, 360, 0.08);
+  }
+
+  private drawCarpetPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    this.drawSpeckles(context, base, detail, rng, 940, 0.08);
+    context.globalAlpha = 0.13;
+    context.strokeStyle = this.colorToCss(detail);
+    context.lineWidth = 1;
+    for (let y = 0; y < 256; y += 6) {
+      context.beginPath();
+      context.moveTo(0, y + rng() * 2);
+      context.lineTo(256, y + rng() * 2);
+      context.stroke();
+    }
+    context.globalAlpha = 0.08;
+    for (let x = 0; x < 256; x += 18) {
+      context.fillStyle = this.colorToCss(base.clone().offsetHSL(0, 0, rng() * 0.1 - 0.05));
+      context.fillRect(x, 0, 4, 256);
+    }
+  }
+
+  private drawWallPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    this.drawSpeckles(context, base, detail, rng, 380, 0.08);
+    context.globalAlpha = 0.2;
+    context.strokeStyle = "rgba(255, 247, 214, 0.35)";
+    context.lineWidth = 2;
+    context.beginPath();
+    context.moveTo(0, 120);
+    context.lineTo(256, 120);
+    context.stroke();
+    context.globalAlpha = 0.16;
+    context.strokeStyle = this.colorToCss(detail);
+    for (let crack = 0; crack < 8; crack += 1) {
+      const x = rng() * 256;
+      const y = rng() * 256;
+      context.beginPath();
+      context.moveTo(x, y);
+      context.lineTo(x + rng() * 28 - 14, y + rng() * 44);
+      context.lineTo(x + rng() * 38 - 19, y + 32 + rng() * 40);
+      context.stroke();
+    }
+    context.globalAlpha = 0.1;
+    context.fillStyle = this.colorToCss(detail.clone().offsetHSL(0, -0.1, -0.12));
+    for (let stain = 0; stain < 9; stain += 1) {
+      context.beginPath();
+      context.ellipse(rng() * 256, rng() * 256, 8 + rng() * 24, 5 + rng() * 16, rng() * Math.PI, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+
+  private drawWoodPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    const gradient = context.createLinearGradient(0, 0, 256, 0);
+    gradient.addColorStop(0, this.colorToCss(base.clone().offsetHSL(0, 0.04, -0.08)));
+    gradient.addColorStop(0.5, this.colorToCss(base));
+    gradient.addColorStop(1, this.colorToCss(detail.clone().offsetHSL(0, -0.03, -0.04)));
+    context.globalAlpha = 1;
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 256, 256);
+    for (let y = 0; y < 256; y += 12) {
+      context.globalAlpha = 0.18 + rng() * 0.12;
+      context.strokeStyle = this.colorToCss(detail.clone().offsetHSL(0, 0, rng() * 0.14 - 0.12));
+      context.lineWidth = 2 + rng() * 3;
+      context.beginPath();
+      context.moveTo(0, y + rng() * 6);
+      for (let x = 0; x <= 256; x += 32) {
+        context.lineTo(x, y + Math.sin(x * 0.035 + rng() * 2) * 7 + rng() * 5);
+      }
+      context.stroke();
+    }
+    context.globalAlpha = 0.22;
+    for (let knot = 0; knot < 5; knot += 1) {
+      context.strokeStyle = this.colorToCss(detail.clone().offsetHSL(0, 0, -0.18));
+      context.lineWidth = 2;
+      context.beginPath();
+      context.ellipse(rng() * 256, rng() * 256, 10 + rng() * 16, 4 + rng() * 6, rng() * Math.PI, 0, Math.PI * 2);
+      context.stroke();
+    }
+  }
+
+  private drawMetalPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    const gradient = context.createLinearGradient(0, 0, 256, 256);
+    gradient.addColorStop(0, this.colorToCss(base.clone().offsetHSL(0, -0.05, 0.12)));
+    gradient.addColorStop(0.45, this.colorToCss(base));
+    gradient.addColorStop(1, this.colorToCss(detail.clone().offsetHSL(0, -0.08, -0.1)));
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 256, 256);
+    context.globalAlpha = 0.18;
+    context.strokeStyle = "rgba(255, 255, 255, 0.55)";
+    context.lineWidth = 1;
+    for (let y = 0; y < 256; y += 7) {
+      context.beginPath();
+      context.moveTo(0, y + rng() * 2);
+      context.lineTo(256, y + rng() * 2);
+      context.stroke();
+    }
+    context.globalAlpha = 0.2;
+    context.fillStyle = "rgba(0, 0, 0, 0.5)";
+    for (let rivet = 0; rivet < 10; rivet += 1) {
+      context.beginPath();
+      context.arc(18 + (rivet % 5) * 54, 30 + Math.floor(rivet / 5) * 178, 3, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+
+  private drawPlasticPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    this.drawSpeckles(context, base, detail, rng, 260, 0.07);
+    context.globalAlpha = 0.22;
+    context.fillStyle = this.colorToCss(detail);
+    context.fillRect(22, 20, 76, 142);
+    context.globalAlpha = 0.16;
+    context.fillStyle = "rgba(255, 255, 255, 0.7)";
+    context.fillRect(32, 30, 54, 8);
+    context.globalAlpha = 0.2;
+    for (let slot = 0; slot < 5; slot += 1) {
+      context.fillStyle = slot % 2 === 0 ? "rgba(5, 10, 8, 0.68)" : this.colorToCss(detail.clone().offsetHSL(0, 0.08, 0.04));
+      context.fillRect(128, 32 + slot * 32, 86, 14);
+    }
+  }
+
+  private drawPaperPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
+    context.fillStyle = this.colorToCss(base);
+    context.fillRect(0, 0, 256, 256);
+    this.drawSpeckles(context, base, detail, rng, 220, 0.06);
+    context.globalAlpha = 0.22;
+    context.strokeStyle = this.colorToCss(detail);
+    context.lineWidth = 2;
+    for (let y = 48; y < 214; y += 24) {
+      context.beginPath();
+      context.moveTo(34, y);
+      context.lineTo(220, y + rng() * 4 - 2);
+      context.stroke();
+    }
+    context.globalAlpha = 0.12;
+    context.strokeRect(18, 18, 220, 220);
+  }
+
+  private drawSpeckles(
+    context: CanvasRenderingContext2D,
+    base: THREE.Color,
+    detail: THREE.Color,
+    rng: () => number,
+    count: number,
+    alpha: number,
+  ) {
+    for (let i = 0; i < count; i += 1) {
+      const value = rng() > 0.48 ? detail : base.clone().offsetHSL(0, 0, rng() * 0.2 - 0.1);
+      context.globalAlpha = alpha * (0.45 + rng());
+      context.fillStyle = this.colorToCss(value);
+      context.fillRect(Math.floor(rng() * 256), Math.floor(rng() * 256), 1 + Math.floor(rng() * 3), 1 + Math.floor(rng() * 3));
+    }
+  }
+
+  private colorToCss(color: THREE.Color) {
+    return `#${color.getHexString()}`;
+  }
+
+  private seededRandom(key: string) {
+    let seed = 2166136261;
+    for (let index = 0; index < key.length; index += 1) {
+      seed ^= key.charCodeAt(index);
+      seed = Math.imul(seed, 16777619);
+    }
+    return () => {
+      seed += 0x6d2b79f5;
+      let value = seed;
+      value = Math.imul(value ^ (value >>> 15), value | 1);
+      value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+      return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  private addFloorDecal(x: number, z: number, radius: number, color: number, opacity: number, trackImpact = false) {
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    });
+    const decal = new THREE.Mesh(new THREE.CircleGeometry(radius, 18), material);
+    decal.rotation.x = -Math.PI / 2;
+    decal.position.set(x, 8.2, z);
+    decal.renderOrder = 2;
+    this.scene.add(decal);
+
+    if (!trackImpact) return;
+    this.impactDecals.push(decal);
+    if (this.impactDecals.length <= 28) return;
+    const oldest = this.impactDecals.shift();
+    if (oldest) this.disposeObject(oldest);
   }
 
   private setMeshColor(mesh: THREE.Mesh | undefined, color: number, opacity = 1) {
@@ -1252,6 +2553,13 @@ class OfficeEscapeGame {
         <div class="card">无卡</div>
         <div class="exp-track"><div class="exp-fill"></div></div>
       </div>
+      <div class="mission-panel">
+        <div class="mission-kicker">OBJECTIVE</div>
+        <div class="mission-title">生存并清场</div>
+        <div class="mission-body">门禁卡将在 35 秒后出现</div>
+        <div class="mission-meta">SURVIVE</div>
+      </div>
+      <div class="alert-banner">老板来了，立即撤离</div>
       <div class="hint">距离下班还有 120 秒</div>
       <div class="evac"><div>正在下班</div><div class="evac-track"><div class="evac-fill"></div></div></div>
       <div class="objective-arrow"></div>
@@ -1291,6 +2599,10 @@ class OfficeEscapeGame {
       timer: root.querySelector<HTMLDivElement>(".timer")!,
       level: root.querySelector<HTMLDivElement>(".level")!,
       card: root.querySelector<HTMLDivElement>(".card")!,
+      missionTitle: root.querySelector<HTMLDivElement>(".mission-title")!,
+      missionBody: root.querySelector<HTMLDivElement>(".mission-body")!,
+      missionMeta: root.querySelector<HTMLDivElement>(".mission-meta")!,
+      alert: root.querySelector<HTMLDivElement>(".alert-banner")!,
       hint: root.querySelector<HTMLDivElement>(".hint")!,
       evac: root.querySelector<HTMLDivElement>(".evac")!,
       evacBar: root.querySelector<HTMLDivElement>(".evac-fill")!,

@@ -3,3 +3,5 @@ dist/
 .DS_Store
 *.log
 *.png
+!src/assets/characters/*.png
+!src/assets/textures/*.png

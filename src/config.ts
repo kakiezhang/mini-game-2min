@@ -5,14 +5,14 @@ export const MAP = {
 
 export const GAME = {
   duration: 120,
-  maxEnemies: 30,
+  maxEnemies: 18,
   elevatorHoldTime: 2,
 };
 
 export const PLAYER_CONFIG = {
   maxHp: 100,
   initialHp: 100,
-  baseSpeed: 220,
+  baseSpeed: 122,
   radius: 20,
   initialLevel: 1,
   initialExp: 0,
@@ -63,7 +63,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
     radius: 15,
     height: 34,
     hp: 18,
-    speed: 70,
+    speed: 39,
     damage: 5,
     expReward: 6,
     contactCooldown: 0.6,
@@ -73,7 +73,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
     radius: 17,
     height: 46,
     hp: 45,
-    speed: 95,
+    speed: 53,
     damage: 8,
     expReward: 12,
     contactCooldown: 0.7,
@@ -83,7 +83,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
     radius: 18,
     height: 40,
     hp: 54,
-    speed: 60,
+    speed: 34,
     damage: 4,
     expReward: 15,
     contactCooldown: 0.8,
@@ -93,7 +93,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
     radius: 30,
     height: 88,
     hp: 900,
-    speed: 115,
+    speed: 65,
     damage: 20,
     expReward: 0,
     contactCooldown: 0.75,
@@ -236,9 +236,9 @@ export const AMMO_CONFIG = {
 };
 
 export const getSpawnStage = (elapsed: number) => {
-  if (elapsed < 15) return { interval: 1.3, count: 1, weights: { bug: 100, changeRequest: 0, meeting: 0 } };
-  if (elapsed < 40) return { interval: 1.15, count: 1, weights: { bug: 75, changeRequest: 25, meeting: 0 } };
-  if (elapsed < 80) return { interval: 1.0, count: 1, weights: { bug: 55, changeRequest: 30, meeting: 15 } };
-  if (elapsed < 90) return { interval: 0.9, count: 2, weights: { bug: 45, changeRequest: 35, meeting: 20 } };
-  return { interval: 0.8, count: 2, weights: { bug: 40, changeRequest: 40, meeting: 20 } };
+  if (elapsed < 15) return { interval: 1.8, count: 1, weights: { bug: 100, changeRequest: 0, meeting: 0 } };
+  if (elapsed < 40) return { interval: 1.65, count: 1, weights: { bug: 75, changeRequest: 25, meeting: 0 } };
+  if (elapsed < 80) return { interval: 1.45, count: 1, weights: { bug: 55, changeRequest: 30, meeting: 15 } };
+  if (elapsed < 90) return { interval: 1.25, count: 1, weights: { bug: 45, changeRequest: 35, meeting: 20 } };
+  return { interval: 1.1, count: 1, weights: { bug: 40, changeRequest: 40, meeting: 20 } };
 };
