@@ -99,8 +99,6 @@ const CHARACTER_TEXTURE_URLS = {
   bossBull: new URL("./assets/textures/boss-bull.png", import.meta.url).href,
 } as const;
 
-const PLAYER_SPRITE_URL = new URL("./assets/characters/player-monkey-sheet.png", import.meta.url).href;
-
 const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
   ready: ["playing"],
   playing: ["levelUpPaused", "success", "failed"],
@@ -117,9 +115,6 @@ const PLAYER_WALK_FRAME_RATE = 10;
 const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
 const PLAYER_SPRITE_WIDTH = 164;
 const PLAYER_SPRITE_HEIGHT = 102;
-const PLAYER_SPRITE_SOURCE_WIDTH = 2560;
-const PLAYER_SPRITE_SOURCE_HEIGHT = 2560;
-const PLAYER_SPRITE_UV_INSET_PIXELS = 2;
 const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
   down: 0,
   downRight: 1,
@@ -160,7 +155,8 @@ class OfficeEscapeGame {
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
-  private playerSpriteTexture?: THREE.Texture;
+  private playerSpriteMaterial?: THREE.SpriteMaterial;
+  private readonly playerSpriteFrames = new Map<string, THREE.Texture>();
   private playerSpriteDirection: PlayerSpriteDirection = "down";
   private playerSpriteFrame = 0;
   private playerSpriteTimer = 0;
@@ -829,22 +825,14 @@ class OfficeEscapeGame {
   private createPlayer() {
     this.player = new THREE.Group();
 
-    const spriteTexture = this.textureLoader.load(PLAYER_SPRITE_URL);
-    spriteTexture.colorSpace = THREE.SRGBColorSpace;
-    spriteTexture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-    spriteTexture.wrapS = THREE.ClampToEdgeWrapping;
-    spriteTexture.wrapT = THREE.ClampToEdgeWrapping;
-    spriteTexture.generateMipmaps = false;
-    spriteTexture.minFilter = THREE.LinearFilter;
-    spriteTexture.magFilter = THREE.LinearFilter;
-    this.playerSpriteTexture = spriteTexture;
-    this.setPlayerSpriteFrame("down", 0);
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: spriteTexture,
+    this.loadPlayerSpriteFrames();
+    this.playerSpriteMaterial = new THREE.SpriteMaterial({
+      map: this.getPlayerSpriteTexture("down", 0),
       transparent: true,
       alphaTest: 0.05,
       depthWrite: false,
-    }));
+    });
+    const sprite = new THREE.Sprite(this.playerSpriteMaterial);
     sprite.position.y = 58;
     sprite.scale.set(PLAYER_SPRITE_WIDTH, PLAYER_SPRITE_HEIGHT, 1);
     sprite.renderOrder = 12;
@@ -1049,18 +1037,42 @@ class OfficeEscapeGame {
   }
 
   private setPlayerSpriteFrame(direction: PlayerSpriteDirection, frame: number) {
-    if (!this.playerSpriteTexture) return;
+    if (!this.playerSpriteMaterial) return;
     const column = THREE.MathUtils.clamp(Math.floor(frame), 0, PLAYER_SPRITE_COLUMNS - 1);
-    const row = PLAYER_DIRECTION_ROW[direction];
-    const cellWidth = 1 / PLAYER_SPRITE_COLUMNS;
-    const cellHeight = 1 / PLAYER_SPRITE_ROWS;
-    const insetX = PLAYER_SPRITE_UV_INSET_PIXELS / PLAYER_SPRITE_SOURCE_WIDTH;
-    const insetY = PLAYER_SPRITE_UV_INSET_PIXELS / PLAYER_SPRITE_SOURCE_HEIGHT;
-    this.playerSpriteTexture.repeat.set(cellWidth - insetX * 2, cellHeight - insetY * 2);
-    this.playerSpriteTexture.offset.set(
-      column * cellWidth + insetX,
-      1 - (row + 1) * cellHeight + insetY,
-    );
+    const texture = this.getPlayerSpriteTexture(direction, column);
+    if (this.playerSpriteMaterial.map === texture) return;
+    this.playerSpriteMaterial.map = texture;
+    this.playerSpriteMaterial.needsUpdate = true;
+  }
+
+  private loadPlayerSpriteFrames() {
+    for (const [direction, row] of Object.entries(PLAYER_DIRECTION_ROW) as [PlayerSpriteDirection, number][]) {
+      for (let column = 0; column < PLAYER_SPRITE_COLUMNS; column += 1) {
+        const texture = this.textureLoader.load(this.playerSpriteFrameUrl(row, column));
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.generateMipmaps = false;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+        this.playerSpriteFrames.set(this.playerSpriteFrameKey(direction, column), texture);
+      }
+    }
+  }
+
+  private getPlayerSpriteTexture(direction: PlayerSpriteDirection, frame: number) {
+    const texture = this.playerSpriteFrames.get(this.playerSpriteFrameKey(direction, frame));
+    if (!texture) throw new Error(`Missing player sprite frame: ${direction} ${frame}`);
+    return texture;
+  }
+
+  private playerSpriteFrameKey(direction: PlayerSpriteDirection, frame: number) {
+    return `${direction}-${frame}`;
+  }
+
+  private playerSpriteFrameUrl(row: number, column: number) {
+    return new URL(`./assets/characters/player-monkey-frames/r${row}-c${column}.png`, import.meta.url).href;
   }
 
   private updateTimeline() {
