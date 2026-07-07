@@ -43,6 +43,10 @@ type Enemy = {
   surroundRadius: number;
   separationX: number;
   separationZ: number;
+  spriteMaterial?: THREE.SpriteMaterial;
+  spriteDirection: PlayerSpriteDirection;
+  spriteFrame: number;
+  spriteTimer: number;
 };
 
 type Particle = {
@@ -115,6 +119,8 @@ const PLAYER_WALK_FRAME_RATE = 10;
 const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
 const PLAYER_SPRITE_WIDTH = 164;
 const PLAYER_SPRITE_HEIGHT = 102;
+const BUG_SPRITE_WIDTH = PLAYER_SPRITE_WIDTH;
+const BUG_SPRITE_HEIGHT = PLAYER_SPRITE_HEIGHT;
 const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
   down: 0,
   downRight: 1,
@@ -157,6 +163,7 @@ class OfficeEscapeGame {
   private playerLight?: THREE.PointLight;
   private playerSpriteMaterial?: THREE.SpriteMaterial;
   private readonly playerSpriteFrames = new Map<string, THREE.Texture>();
+  private readonly bugSpriteFrames = new Map<string, THREE.Texture>();
   private playerSpriteDirection: PlayerSpriteDirection = "down";
   private playerSpriteFrame = 0;
   private playerSpriteTimer = 0;
@@ -1013,18 +1020,22 @@ class OfficeEscapeGame {
   }
 
   private getPlayerSpriteDirection(moveX: number, moveZ: number): PlayerSpriteDirection {
-    const origin = new THREE.Vector3(this.playerState.x, 0, this.playerState.z).project(this.camera);
-    const target = new THREE.Vector3(this.playerState.x + moveX * 100, 0, this.playerState.z + moveZ * 100).project(this.camera);
+    return this.getSpriteDirection(this.playerState.x, this.playerState.z, moveX, moveZ, this.playerSpriteDirection);
+  }
+
+  private getSpriteDirection(x: number, z: number, moveX: number, moveZ: number, currentDirection: PlayerSpriteDirection): PlayerSpriteDirection {
+    const origin = new THREE.Vector3(x, 0, z).project(this.camera);
+    const target = new THREE.Vector3(x + moveX * 100, 0, z + moveZ * 100).project(this.camera);
     const screenX = target.x - origin.x;
     const screenY = target.y - origin.y;
     const angle = Math.atan2(screenY, screenX);
     const sector = this.wrapDirectionIndex(Math.round(angle / (Math.PI / 4)));
-    const currentIndex = PLAYER_SCREEN_DIRECTION_INDEX[this.playerSpriteDirection];
-    if (sector === currentIndex) return this.playerSpriteDirection;
+    const currentIndex = PLAYER_SCREEN_DIRECTION_INDEX[currentDirection];
+    if (sector === currentIndex) return currentDirection;
 
     const currentAngle = currentIndex * (Math.PI / 4);
     const angleDelta = Math.abs(this.shortestAngleDelta(angle, currentAngle));
-    if (angleDelta < PLAYER_DIRECTION_HYSTERESIS) return this.playerSpriteDirection;
+    if (angleDelta < PLAYER_DIRECTION_HYSTERESIS) return currentDirection;
     return PLAYER_SCREEN_DIRECTIONS[sector];
   }
 
@@ -1075,6 +1086,33 @@ class OfficeEscapeGame {
     return new URL(`./assets/characters/player-monkey-frames/r${row}-c${column}.png`, import.meta.url).href;
   }
 
+  private loadBugSpriteFrames() {
+    if (this.bugSpriteFrames.size > 0) return;
+    for (const [direction, row] of Object.entries(PLAYER_DIRECTION_ROW) as [PlayerSpriteDirection, number][]) {
+      for (let column = 0; column < PLAYER_SPRITE_COLUMNS; column += 1) {
+        const texture = this.textureLoader.load(this.bugSpriteFrameUrl(row, column));
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.generateMipmaps = false;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+        this.bugSpriteFrames.set(this.playerSpriteFrameKey(direction, column), texture);
+      }
+    }
+  }
+
+  private getBugSpriteTexture(direction: PlayerSpriteDirection, frame: number) {
+    const texture = this.bugSpriteFrames.get(this.playerSpriteFrameKey(direction, frame));
+    if (!texture) throw new Error(`Missing bug sprite frame: ${direction} ${frame}`);
+    return texture;
+  }
+
+  private bugSpriteFrameUrl(row: number, column: number) {
+    return new URL(`./assets/enemies/bug-frames/r${row}-c${column}.png`, import.meta.url).href;
+  }
+
   private updateTimeline() {
     if (!this.accessCardSpawned && this.elapsed >= 35) {
       this.accessCardSpawned = true;
@@ -1122,8 +1160,8 @@ class OfficeEscapeGame {
   }
 
   private spawnEnemy(kind: Exclude<EnemyKind, "boss">) {
-    const margin = 42;
     const radius = ENEMY_CONFIG[kind].radius;
+    const margin = Math.max(42, radius + 16);
     for (let attempt = 0; attempt < 12; attempt += 1) {
       const side = Math.floor(Math.random() * 4);
       let x = margin;
@@ -1156,11 +1194,12 @@ class OfficeEscapeGame {
     const healthBarWidth = kind === "boss" ? 86 : 48;
     const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
     const healthFill = healthBar.children[1] as THREE.Mesh;
+    let spriteMaterial: THREE.SpriteMaterial | undefined;
 
     if (kind === "boss") {
       this.addBossModel(group, config);
     } else if (kind === "bug") {
-      this.addBugModel(group, config);
+      spriteMaterial = this.addBugModel(group, config);
     } else if (kind === "changeRequest") {
       this.addChangeRequestModel(group, config);
     } else if (kind === "meeting") {
@@ -1192,30 +1231,28 @@ class OfficeEscapeGame {
       surroundRadius: kind === "boss" ? 0 : THREE.MathUtils.randFloat(34, 118),
       separationX: 0,
       separationZ: 0,
+      spriteMaterial,
+      spriteDirection: "down",
+      spriteFrame: 0,
+      spriteTimer: Math.random() / PLAYER_WALK_FRAME_RATE,
     });
     this.nextEnemyId += 1;
   }
 
-  private addBugModel(group: THREE.Group, config: EnemyConfig) {
-    const hide = this.characterInstanceMaterial("oxHide");
-    const body = this.meshWithMaterial(new THREE.CylinderGeometry(config.radius * 0.98, config.radius * 1.18, config.height, 18), hide);
-    body.position.y = config.height / 2;
-    const head = this.meshWithMaterial(new THREE.SphereGeometry(config.radius * 0.78, 18, 12), hide);
-    head.position.set(0, config.height + 8, 6);
-    const snout = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xffb4a8);
-    snout.scale.set(9, 4.5, 5);
-    snout.position.set(0, config.height + 5, 16);
-    const leftHorn = this.mesh(new THREE.ConeGeometry(4, 18, 10), 0xf6e6c2);
-    leftHorn.position.set(-13, config.height + 14, 2);
-    leftHorn.rotation.z = Math.PI / 2.45;
-    const rightHorn = leftHorn.clone();
-    rightHorn.position.x = 13;
-    rightHorn.rotation.z = -Math.PI / 2.45;
-    const badge = this.mesh(new THREE.BoxGeometry(18, 12, 4), 0xffd166);
-    badge.position.set(0, config.height * 0.56, 15);
-    const pack = this.mesh(new THREE.BoxGeometry(24, 14, 13), 0x4a1714);
-    pack.position.set(0, config.height * 0.48, -14);
-    group.add(body, head, snout, leftHorn, rightHorn, badge, pack);
+  private addBugModel(group: THREE.Group, _config: EnemyConfig) {
+    this.loadBugSpriteFrames();
+    const material = new THREE.SpriteMaterial({
+      map: this.getBugSpriteTexture("down", 0),
+      transparent: true,
+      alphaTest: 0.05,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.y = 58;
+    sprite.scale.set(BUG_SPRITE_WIDTH, BUG_SPRITE_HEIGHT, 1);
+    sprite.renderOrder = 11;
+    group.add(sprite);
+    return material;
   }
 
   private addChangeRequestModel(group: THREE.Group, config: EnemyConfig) {
@@ -1362,6 +1399,7 @@ class OfficeEscapeGame {
       enemy.group.position.x = nextPosition.x;
       enemy.group.position.z = nextPosition.z;
       enemy.group.rotation.y = Math.atan2(moveX, moveZ);
+      this.updateEnemySprite(enemy, delta, moveX, moveZ);
       this.updateEnemyVisualState(enemy);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
@@ -1381,6 +1419,28 @@ class OfficeEscapeGame {
         }
       }
     }
+  }
+
+  private updateEnemySprite(enemy: Enemy, delta: number, moveX: number, moveZ: number) {
+    if (!enemy.spriteMaterial) return;
+    const moving = Math.hypot(moveX, moveZ) > 0.08;
+    if (moving) {
+      enemy.spriteDirection = this.getSpriteDirection(enemy.group.position.x, enemy.group.position.z, moveX, moveZ, enemy.spriteDirection);
+      enemy.spriteTimer += delta;
+      const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
+      while (enemy.spriteTimer >= frameStep) {
+        enemy.spriteTimer -= frameStep;
+        enemy.spriteFrame = enemy.spriteFrame >= 4 ? 1 : enemy.spriteFrame + 1;
+      }
+    } else {
+      enemy.spriteTimer = 0;
+      enemy.spriteFrame = 0;
+    }
+
+    const texture = this.getBugSpriteTexture(enemy.spriteDirection, enemy.spriteFrame);
+    if (enemy.spriteMaterial.map === texture) return;
+    enemy.spriteMaterial.map = texture;
+    enemy.spriteMaterial.needsUpdate = true;
   }
 
   private recomputeEnemySeparation() {
@@ -1519,6 +1579,15 @@ class OfficeEscapeGame {
     const disposedGeometries = new WeakSet<THREE.BufferGeometry>();
     const disposedMaterials = new WeakSet<THREE.Material>();
     root.traverse((object) => {
+      if (object instanceof THREE.Sprite) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of materials) {
+          if (material.userData.shared || disposedMaterials.has(material)) continue;
+          material.dispose();
+          disposedMaterials.add(material);
+        }
+        return;
+      }
       if (!(object instanceof THREE.Mesh)) return;
       if (!disposedGeometries.has(object.geometry)) {
         object.geometry.dispose();

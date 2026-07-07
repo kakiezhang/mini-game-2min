@@ -5,4 +5,5 @@ dist/
 *.png
 !src/assets/characters/*.png
 !src/assets/characters/**/*.png
+!src/assets/enemies/**/*.png
 !src/assets/textures/*.png

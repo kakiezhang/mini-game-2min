@@ -13,7 +13,7 @@ export const PLAYER_CONFIG = {
   maxHp: 100,
   initialHp: 100,
   baseSpeed: 122,
-  radius: 20,
+  radius: 30,
   initialLevel: 1,
   initialExp: 0,
   invincibleAfterHit: 0.35,
@@ -60,7 +60,7 @@ export type EnemyConfig = {
 export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
   bug: {
     color: COLORS.bug,
-    radius: 15,
+    radius: 36,
     height: 34,
     hp: 18,
     speed: 39,
