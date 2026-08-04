@@ -6,6 +6,7 @@ import { PNG } from "pngjs";
 const usage = `
 Usage:
   node scripts/build-character-frames-from-rows.mjs --input-dir <row-dir> --output-dir <frame-dir>
+  node scripts/build-character-frames-from-rows.mjs --input-dir <row-dir> --output-dir <frame-dir> --scale-mode normalize-height
 
 Expected row files:
   row0_down.png
@@ -27,6 +28,8 @@ const rows = readInteger(args.rows ?? "8", "rows");
 const outputWidth = readInteger(args.width ?? "512", "width");
 const outputHeight = readInteger(args.height ?? "320", "height");
 const padding = readInteger(args.padding ?? "16", "padding");
+const scaleMode = readScaleMode(args["scale-mode"] ?? "uniform");
+const normalizeHeight = readInteger(args["normalize-height"] ?? String(outputHeight - padding * 2), "normalize-height");
 
 const rowFiles = [
   "row0_down.png",
@@ -73,17 +76,51 @@ for (let row = 0; row < rows; row += 1) {
 const maxWidth = Math.max(...sourceFrames.map((frame) => frame.bounds.width));
 const maxHeight = Math.max(...sourceFrames.map((frame) => frame.bounds.height));
 const scale = Math.min((outputWidth - padding * 2) / maxWidth, (outputHeight - padding * 2) / maxHeight);
+const rowScales = buildRowScales(sourceFrames, rows, scaleMode, scale, normalizeHeight, outputWidth, outputHeight, padding);
 
 fs.rmSync(outputDir, { recursive: true, force: true });
 fs.mkdirSync(outputDir, { recursive: true });
 
 for (const sourceFrame of sourceFrames) {
-  const output = renderFrame(sourceFrame, outputWidth, outputHeight, padding, scale);
+  const output = renderFrame(sourceFrame, outputWidth, outputHeight, padding, rowScales.get(sourceFrame.row) ?? scale);
   fs.writeFileSync(path.join(outputDir, `r${sourceFrame.row}-c${sourceFrame.column}.png`), PNG.sync.write(output));
 }
 
 console.log(`Wrote ${sourceFrames.length} frames to ${outputDir}`);
+console.log(`Scale mode: ${scaleMode}`);
 console.log(`Scale: ${scale.toFixed(4)}`);
+if (scaleMode === "normalize-height") {
+  console.log(`Normalize height: ${normalizeHeight}px`);
+  console.log(`Row scales: ${[...rowScales.entries()].map(([row, rowScale]) => `r${row}=${rowScale.toFixed(4)}`).join(", ")}`);
+}
+
+function buildRowScales(sourceFrames, rows, scaleMode, uniformScale, normalizeHeight, outputWidth, outputHeight, padding) {
+  const rowScales = new Map();
+  if (scaleMode === "uniform") {
+    for (let row = 0; row < rows; row += 1) rowScales.set(row, uniformScale);
+    return rowScales;
+  }
+
+  const maxOutputWidth = outputWidth - padding * 2;
+  const maxOutputHeight = outputHeight - padding * 2;
+  for (let row = 0; row < rows; row += 1) {
+    const rowFrames = sourceFrames.filter((frame) => frame.row === row);
+    const rowHeight = median(rowFrames.map((frame) => frame.bounds.height));
+    const rowMaxWidth = Math.max(...rowFrames.map((frame) => frame.bounds.width));
+    const rowMaxHeight = Math.max(...rowFrames.map((frame) => frame.bounds.height));
+    const targetScale = normalizeHeight / rowHeight;
+    const fitScale = Math.min(maxOutputWidth / rowMaxWidth, maxOutputHeight / rowMaxHeight);
+    rowScales.set(row, Math.min(targetScale, fitScale));
+  }
+  return rowScales;
+}
+
+function median(values) {
+  const sorted = [...values].sort((first, second) => first - second);
+  const midpoint = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[midpoint];
+  return (sorted[midpoint - 1] + sorted[midpoint]) / 2;
+}
 
 function detectBackgroundColors(image) {
   const counts = new Map();
@@ -346,4 +383,9 @@ function readInteger(value, label) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected --${label} to be a positive integer, got: ${value}`);
   return parsed;
+}
+
+function readScaleMode(value) {
+  if (value === "uniform" || value === "normalize-height") return value;
+  throw new Error(`Expected --scale-mode to be "uniform" or "normalize-height", got: ${value}`);
 }

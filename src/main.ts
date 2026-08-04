@@ -117,10 +117,10 @@ const PLAYER_SPRITE_COLUMNS = 5;
 const PLAYER_SPRITE_ROWS = 8;
 const PLAYER_WALK_FRAME_RATE = 10;
 const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
-const PLAYER_SPRITE_WIDTH = 164;
-const PLAYER_SPRITE_HEIGHT = 102;
-const BUG_SPRITE_WIDTH = PLAYER_SPRITE_WIDTH;
-const BUG_SPRITE_HEIGHT = PLAYER_SPRITE_HEIGHT;
+const PLAYER_SPRITE_WIDTH = 188;
+const PLAYER_SPRITE_HEIGHT = 118;
+const BUG_SPRITE_WIDTH = 164;
+const BUG_SPRITE_HEIGHT = 102;
 const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
   down: 0,
   downRight: 1,
@@ -1009,7 +1009,7 @@ class OfficeEscapeGame {
       const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
       while (this.playerSpriteTimer >= frameStep) {
         this.playerSpriteTimer -= frameStep;
-        this.playerSpriteFrame = this.playerSpriteFrame >= 4 ? 1 : this.playerSpriteFrame + 1;
+        this.playerSpriteFrame = (this.playerSpriteFrame + 1) % PLAYER_SPRITE_COLUMNS;
       }
     } else {
       this.playerSpriteTimer = 0;
@@ -1083,7 +1083,7 @@ class OfficeEscapeGame {
   }
 
   private playerSpriteFrameUrl(row: number, column: number) {
-    return new URL(`./assets/characters/player-monkey-frames/r${row}-c${column}.png`, import.meta.url).href;
+    return new URL(`./assets/characters/player-human-frames/r${row}-c${column}.png`, import.meta.url).href;
   }
 
   private loadBugSpriteFrames() {
@@ -1430,7 +1430,7 @@ class OfficeEscapeGame {
       const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
       while (enemy.spriteTimer >= frameStep) {
         enemy.spriteTimer -= frameStep;
-        enemy.spriteFrame = enemy.spriteFrame >= 4 ? 1 : enemy.spriteFrame + 1;
+        enemy.spriteFrame = (enemy.spriteFrame + 1) % PLAYER_SPRITE_COLUMNS;
       }
     } else {
       enemy.spriteTimer = 0;
