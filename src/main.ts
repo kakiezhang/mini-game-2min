@@ -1038,7 +1038,11 @@ class OfficeEscapeGame {
       } else {
         z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
       }
-      if (this.distanceToPlayer(x, z) < 300 || !this.navigation.canOccupy(x, z, radius)) continue;
+      if (
+        this.distanceToPlayer(x, z) < 300
+        || !this.navigation.canOccupy(x, z, radius)
+        || !this.navigation.canReach(x, z, this.playerState.x, this.playerState.z, radius)
+      ) continue;
       this.createEnemy(kind, x, z);
       return;
     }
@@ -1233,7 +1237,8 @@ class OfficeEscapeGame {
         moveZ += enemy.separationZ * 1.6;
       }
 
-      const length = Math.max(Math.hypot(moveX, moveZ), 0.001);
+      const movementLength = Math.hypot(moveX, moveZ);
+      const length = Math.max(movementLength, 0.001);
       const nextPosition = this.navigation.moveCircle(
         enemy.group.position.x,
         enemy.group.position.z,
@@ -1243,7 +1248,7 @@ class OfficeEscapeGame {
       );
       enemy.group.position.x = nextPosition.x;
       enemy.group.position.z = nextPosition.z;
-      enemy.group.rotation.y = Math.atan2(moveX, moveZ);
+      if (movementLength > 0.08) enemy.group.rotation.y = Math.atan2(moveX, moveZ);
       enemy.visual.setMovement(moveX, moveZ);
       enemy.visual.update(delta);
       this.updateEnemyVisualState(enemy);

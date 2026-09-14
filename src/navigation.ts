@@ -33,7 +33,7 @@ export class NavigationWorld {
     private readonly width: number,
     private readonly depth: number,
     private readonly cellSize = 40,
-    private readonly navigationClearance = 30,
+    private readonly navigationClearance = 36,
   ) {
     this.columns = Math.ceil(width / cellSize);
     this.rows = Math.ceil(depth / cellSize);
@@ -57,6 +57,22 @@ export class NavigationWorld {
 
   canOccupy(x: number, z: number, radius: number) {
     return !this.isCircleBlocked(x, z, radius);
+  }
+
+  canReach(x: number, z: number, targetX: number, targetZ: number, radius: number) {
+    this.ensureFlow(targetX, targetZ);
+    const column = this.toColumn(x);
+    const row = this.toRow(z);
+    if (this.distances[this.index(column, row)] >= 0) return true;
+
+    return NEIGHBORS.some(([columnOffset, rowOffset]) => {
+      const nextColumn = column + columnOffset;
+      const nextRow = row + rowOffset;
+      if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(column, row, nextColumn, nextRow)) return false;
+      if (this.distances[this.index(nextColumn, nextRow)] < 0) return false;
+      const waypoint = this.cellCenter(nextColumn, nextRow);
+      return this.hasClearPath(x, z, waypoint.x, waypoint.z, radius);
+    });
   }
 
   raycastObstacleDistance(x: number, z: number, directionX: number, directionZ: number, maxDistance: number) {
@@ -87,25 +103,45 @@ export class NavigationWorld {
     this.ensureFlow(targetX, targetZ);
     const column = this.toColumn(x);
     const row = this.toRow(z);
-    let bestColumn = column;
-    let bestRow = row;
-    let bestDistance = this.distances[this.index(column, row)];
+    const currentDistance = this.distances[this.index(column, row)];
+    const currentTargetDistance = Math.hypot(targetX - x, targetZ - z);
+    const candidates: Array<{ distance: number; targetDistance: number; waypoint: Point }> = [];
 
     for (const [columnOffset, rowOffset] of NEIGHBORS) {
       const nextColumn = column + columnOffset;
       const nextRow = row + rowOffset;
       if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(column, row, nextColumn, nextRow)) continue;
       const distance = this.distances[this.index(nextColumn, nextRow)];
-      if (distance >= 0 && (bestDistance < 0 || distance < bestDistance)) {
-        bestDistance = distance;
-        bestColumn = nextColumn;
-        bestRow = nextRow;
-      }
+      if (distance < 0) continue;
+      const waypoint = this.cellCenter(nextColumn, nextRow);
+      if (!this.hasClearPath(x, z, waypoint.x, waypoint.z, radius)) continue;
+      candidates.push({
+        distance,
+        targetDistance: Math.hypot(targetX - waypoint.x, targetZ - waypoint.z),
+        waypoint,
+      });
     }
 
-    if (bestColumn === column && bestRow === row) return this.normalized(targetX - x, targetZ - z);
-    const waypoint = this.cellCenter(bestColumn, bestRow);
-    return this.normalized(waypoint.x - x, waypoint.z - z);
+    candidates.sort((first, second) => first.distance - second.distance || first.targetDistance - second.targetDistance);
+    const best = candidates.find((candidate) => currentDistance < 0 || candidate.distance < currentDistance)
+      ?? candidates.find((candidate) => candidate.distance === currentDistance && candidate.targetDistance < currentTargetDistance);
+    if (best) return this.normalized(best.waypoint.x - x, best.waypoint.z - z);
+
+    // Grid routes are guaranteed between cell centers, but an agent can enter a
+    // cell near an obstacle corner. Re-centering gives it a safe approach to the
+    // next waypoint instead of repeatedly pushing into that corner.
+    const currentWaypoint = this.cellCenter(column, row);
+    if (
+      Math.hypot(currentWaypoint.x - x, currentWaypoint.z - z) > 1
+      && this.hasClearPath(x, z, currentWaypoint.x, currentWaypoint.z, radius)
+    ) {
+      return this.normalized(currentWaypoint.x - x, currentWaypoint.z - z);
+    }
+
+    // Never fall back to steering through a wall. Remaining stationary for one
+    // frame lets a moving target or obstacle rebuild the flow field safely.
+    if (this.hasClearPath(x, z, targetX, targetZ, radius)) return this.normalized(targetX - x, targetZ - z);
+    return { x: 0, z: 0 };
   }
 
   private isCircleBlocked(x: number, z: number, radius: number) {
