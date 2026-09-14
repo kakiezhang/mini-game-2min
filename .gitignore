@@ -8,3 +8,8 @@ dist/
 !src/assets/enemies/**/*.png
 !src/assets/textures/*.png
 *.glb
+!ksman_walk_1k_meshopt.glb
+*.fbx
+*.blend
+*.blend1
+old_models/

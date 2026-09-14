@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import "./styles.css";
 import { traceCircleTargets, type AttackRequest } from "./combat";
 import {
@@ -94,6 +96,8 @@ const TEXTURE_URLS: Partial<Record<SurfaceStyle, string>> = {
   metal: new URL("./assets/textures/metal.png", import.meta.url).href,
 };
 
+const PLAYER_MODEL_URL = new URL("../ksman_walk_1k_meshopt.glb", import.meta.url).href;
+
 const CHARACTER_TEXTURE_URLS = {
   monkeyFur: new URL("./assets/textures/monkey-fur.png", import.meta.url).href,
   monkeyHoodie: new URL("./assets/textures/monkey-hoodie.png", import.meta.url).href,
@@ -117,8 +121,7 @@ const PLAYER_SPRITE_COLUMNS = 5;
 const PLAYER_SPRITE_ROWS = 8;
 const PLAYER_WALK_FRAME_RATE = 10;
 const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
-const PLAYER_SPRITE_WIDTH = 188;
-const PLAYER_SPRITE_HEIGHT = 118;
+const PLAYER_MODEL_HEIGHT = 118;
 const BUG_SPRITE_WIDTH = 164;
 const BUG_SPRITE_HEIGHT = 102;
 const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
@@ -161,12 +164,10 @@ class OfficeEscapeGame {
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
-  private playerSpriteMaterial?: THREE.SpriteMaterial;
-  private readonly playerSpriteFrames = new Map<string, THREE.Texture>();
+  private playerAnimationMixer?: THREE.AnimationMixer;
+  private playerWalkAction?: THREE.AnimationAction;
+  private playerWasMoving = false;
   private readonly bugSpriteFrames = new Map<string, THREE.Texture>();
-  private playerSpriteDirection: PlayerSpriteDirection = "down";
-  private playerSpriteFrame = 0;
-  private playerSpriteTimer = 0;
   private input?: InputController;
   private crosshair?: THREE.Group;
   private enemies: Enemy[] = [];
@@ -237,7 +238,7 @@ class OfficeEscapeGame {
     this.setupCamera();
     this.createLights();
     this.createMap();
-    this.createPlayer();
+    const playerReady = this.createPlayer();
     this.createFixedAmmoSupplies();
     this.createCrosshair();
     this.input = new InputController(this.renderer.domElement, this.camera, {
@@ -245,10 +246,16 @@ class OfficeEscapeGame {
       knob: this.hud.joystickKnob,
     }, this.hud.fireButton, this.hud.reloadButton);
     this.bindEvents();
-    this.showHint("距离下班还有 120 秒");
+    this.showHint("正在加载角色模型…");
     this.resize();
-    this.transitionTo("playing");
     this.animate();
+    void playerReady.then(() => {
+      this.showHint("距离下班还有 120 秒");
+      this.transitionTo("playing");
+    }).catch((error: unknown) => {
+      console.error("Failed to load the player model", error);
+      this.showHint("角色模型加载失败，请刷新重试");
+    });
   }
 
   private setupCamera() {
@@ -829,20 +836,8 @@ class OfficeEscapeGame {
     }
   }
 
-  private createPlayer() {
+  private async createPlayer() {
     this.player = new THREE.Group();
-
-    this.loadPlayerSpriteFrames();
-    this.playerSpriteMaterial = new THREE.SpriteMaterial({
-      map: this.getPlayerSpriteTexture("down", 0),
-      transparent: true,
-      alphaTest: 0.05,
-      depthWrite: false,
-    });
-    const sprite = new THREE.Sprite(this.playerSpriteMaterial);
-    sprite.position.y = 58;
-    sprite.scale.set(PLAYER_SPRITE_WIDTH, PLAYER_SPRITE_HEIGHT, 1);
-    sprite.renderOrder = 12;
 
     const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
     muzzleAccent.position.set(16, 44, 83);
@@ -853,13 +848,56 @@ class OfficeEscapeGame {
     selectionRing.rotation.x = -Math.PI / 2;
     selectionRing.position.y = 3;
 
-    this.player.add(sprite, muzzleAccent, selectionRing);
+    this.player.add(muzzleAccent, selectionRing);
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.scene.add(this.player);
 
     this.playerLight = new THREE.PointLight(0xaee8ff, 0.45, 260, 1.9);
     this.playerLight.position.set(this.playerState.x, 72, this.playerState.z);
     this.scene.add(this.playerLight);
+
+    const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(PLAYER_MODEL_URL);
+    const model = gltf.scene;
+    const walkClip = gltf.animations.find((clip) => /walk/i.test(clip.name)) ?? gltf.animations[0];
+    if (!walkClip) throw new Error("Player model contains no animation clips");
+    this.playerAnimationMixer = new THREE.AnimationMixer(model);
+    this.playerWalkAction = this.playerAnimationMixer.clipAction(walkClip);
+    this.playerWalkAction.play();
+    this.playerWalkAction.paused = true;
+    this.playerWalkAction.time = walkClip.duration * 0.5;
+    this.playerAnimationMixer.update(0);
+
+    // Measure after applying the Mixamo animation. This export's bind pose is
+    // Z-up, while its animation tracks correctly resolve to Three.js Y-up.
+    model.updateMatrixWorld(true);
+    const sourceBounds = new THREE.Box3().setFromObject(model);
+    const sourceHeight = sourceBounds.getSize(new THREE.Vector3()).y;
+    if (!Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+      throw new Error("Player model has invalid bounds");
+    }
+
+    model.scale.setScalar(PLAYER_MODEL_HEIGHT / sourceHeight);
+    model.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(model);
+    const center = bounds.getCenter(new THREE.Vector3());
+    model.position.x -= center.x;
+    model.position.y -= bounds.min.y;
+    model.position.z -= center.z;
+    model.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.castShadow = true;
+      object.receiveShadow = true;
+      object.frustumCulled = false;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+        material.envMapIntensity = 0.7;
+        if (material.map) {
+          material.map.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+        }
+      }
+    });
+    this.player.add(model);
   }
 
   private createCrosshair() {
@@ -996,31 +1034,23 @@ class OfficeEscapeGame {
     this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.player.rotation.y = Math.atan2(input.aimX, input.aimZ);
-    this.updatePlayerSprite(delta, input);
+    this.updatePlayerAnimation(delta, input);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
     this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
   }
 
-  private updatePlayerSprite(delta: number, input: InputState) {
+  private updatePlayerAnimation(delta: number, input: InputState) {
+    if (!this.playerAnimationMixer || !this.playerWalkAction) return;
     const moving = Math.hypot(input.moveX, input.moveZ) > 0.08;
     if (moving) {
-      this.playerSpriteDirection = this.getPlayerSpriteDirection(input.moveX, input.moveZ);
-      this.playerSpriteTimer += delta;
-      const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
-      while (this.playerSpriteTimer >= frameStep) {
-        this.playerSpriteTimer -= frameStep;
-        this.playerSpriteFrame = (this.playerSpriteFrame + 1) % PLAYER_SPRITE_COLUMNS;
-      }
-    } else {
-      this.playerSpriteTimer = 0;
-      this.playerSpriteFrame = 0;
+      this.playerWalkAction.paused = false;
+      this.playerAnimationMixer.update(delta);
+    } else if (this.playerWasMoving) {
+      this.playerWalkAction.paused = true;
+      this.playerWalkAction.time = this.playerWalkAction.getClip().duration * 0.5;
+      this.playerAnimationMixer.update(0);
     }
-
-    this.setPlayerSpriteFrame(this.playerSpriteDirection, this.playerSpriteFrame);
-  }
-
-  private getPlayerSpriteDirection(moveX: number, moveZ: number): PlayerSpriteDirection {
-    return this.getSpriteDirection(this.playerState.x, this.playerState.z, moveX, moveZ, this.playerSpriteDirection);
+    this.playerWasMoving = moving;
   }
 
   private getSpriteDirection(x: number, z: number, moveX: number, moveZ: number, currentDirection: PlayerSpriteDirection): PlayerSpriteDirection {
@@ -1047,43 +1077,8 @@ class OfficeEscapeGame {
     return Math.atan2(Math.sin(angle - target), Math.cos(angle - target));
   }
 
-  private setPlayerSpriteFrame(direction: PlayerSpriteDirection, frame: number) {
-    if (!this.playerSpriteMaterial) return;
-    const column = THREE.MathUtils.clamp(Math.floor(frame), 0, PLAYER_SPRITE_COLUMNS - 1);
-    const texture = this.getPlayerSpriteTexture(direction, column);
-    if (this.playerSpriteMaterial.map === texture) return;
-    this.playerSpriteMaterial.map = texture;
-    this.playerSpriteMaterial.needsUpdate = true;
-  }
-
-  private loadPlayerSpriteFrames() {
-    for (const [direction, row] of Object.entries(PLAYER_DIRECTION_ROW) as [PlayerSpriteDirection, number][]) {
-      for (let column = 0; column < PLAYER_SPRITE_COLUMNS; column += 1) {
-        const texture = this.textureLoader.load(this.playerSpriteFrameUrl(row, column));
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.generateMipmaps = false;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-        this.playerSpriteFrames.set(this.playerSpriteFrameKey(direction, column), texture);
-      }
-    }
-  }
-
-  private getPlayerSpriteTexture(direction: PlayerSpriteDirection, frame: number) {
-    const texture = this.playerSpriteFrames.get(this.playerSpriteFrameKey(direction, frame));
-    if (!texture) throw new Error(`Missing player sprite frame: ${direction} ${frame}`);
-    return texture;
-  }
-
-  private playerSpriteFrameKey(direction: PlayerSpriteDirection, frame: number) {
+  private spriteFrameKey(direction: PlayerSpriteDirection, frame: number) {
     return `${direction}-${frame}`;
-  }
-
-  private playerSpriteFrameUrl(row: number, column: number) {
-    return new URL(`./assets/characters/player-human-frames/r${row}-c${column}.png`, import.meta.url).href;
   }
 
   private loadBugSpriteFrames() {
@@ -1098,13 +1093,13 @@ class OfficeEscapeGame {
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
         texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-        this.bugSpriteFrames.set(this.playerSpriteFrameKey(direction, column), texture);
+        this.bugSpriteFrames.set(this.spriteFrameKey(direction, column), texture);
       }
     }
   }
 
   private getBugSpriteTexture(direction: PlayerSpriteDirection, frame: number) {
-    const texture = this.bugSpriteFrames.get(this.playerSpriteFrameKey(direction, frame));
+    const texture = this.bugSpriteFrames.get(this.spriteFrameKey(direction, frame));
     if (!texture) throw new Error(`Missing bug sprite frame: ${direction} ${frame}`);
     return texture;
   }
