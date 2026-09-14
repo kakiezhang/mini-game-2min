@@ -3,7 +3,6 @@ import "./styles.css";
 import {
   CharacterAssetStore,
   StaticCharacterVisual,
-  type CharacterAnimationState,
   type CharacterVisual,
 } from "./characters/animated-character";
 import { CHARACTER_MODELS } from "./characters/catalog";
@@ -87,8 +86,6 @@ type AmmoPickup = {
 
 type GameState = "ready" | "playing" | "levelUpPaused" | "success" | "failed";
 type SurfaceStyle = "concrete" | "tile" | "carpet" | "wall" | "wood" | "metal" | "plastic" | "paper";
-type PlayerSpriteDirection = "down" | "downRight" | "right" | "upRight" | "up" | "upLeft" | "left" | "downLeft";
-
 const TEXTURE_URLS: Partial<Record<SurfaceStyle, string>> = {
   concrete: new URL("./assets/textures/concrete.png", import.meta.url).href,
   tile: new URL("./assets/textures/floor-tile.png", import.meta.url).href,
@@ -117,36 +114,6 @@ const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
 
 const ENEMY_SEPARATION_INTERVAL = 0.08;
 const MAX_ACTIVE_PARTICLES = 90;
-const PLAYER_SPRITE_COLUMNS = 5;
-const PLAYER_SPRITE_ROWS = 8;
-const PLAYER_WALK_FRAME_RATE = 10;
-const PLAYER_DIRECTION_HYSTERESIS = THREE.MathUtils.degToRad(30);
-const BUG_SPRITE_WIDTH = 164;
-const BUG_SPRITE_HEIGHT = 102;
-const PLAYER_DIRECTION_ROW: Record<PlayerSpriteDirection, number> = {
-  down: 0,
-  downRight: 1,
-  right: 2,
-  upRight: 3,
-  up: 4,
-  upLeft: 5,
-  left: 6,
-  downLeft: 7,
-};
-const PLAYER_SCREEN_DIRECTIONS: PlayerSpriteDirection[] = [
-  "right",
-  "upRight",
-  "up",
-  "upLeft",
-  "left",
-  "downLeft",
-  "down",
-  "downRight",
-];
-const PLAYER_SCREEN_DIRECTION_INDEX = PLAYER_SCREEN_DIRECTIONS.reduce<Record<PlayerSpriteDirection, number>>((indices, direction, index) => {
-  indices[direction] = index;
-  return indices;
-}, {} as Record<PlayerSpriteDirection, number>);
 
 class OfficeEscapeGame {
   private readonly app = document.querySelector<HTMLDivElement>("#app")!;
@@ -165,7 +132,6 @@ class OfficeEscapeGame {
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
   private playerVisual?: CharacterVisual;
-  private readonly bugSpriteFrames = new Map<string, THREE.Texture>();
   private input?: InputController;
   private crosshair?: THREE.Group;
   private enemies: Enemy[] = [];
@@ -236,7 +202,10 @@ class OfficeEscapeGame {
     this.setupCamera();
     this.createLights();
     this.createMap();
-    const playerReady = this.createPlayer();
+    const charactersReady = Promise.all([
+      this.createPlayer(),
+      this.characterAssets.preload(CHARACTER_MODELS.bug),
+    ]);
     this.createFixedAmmoSupplies();
     this.createCrosshair();
     this.input = new InputController(this.renderer.domElement, this.camera, {
@@ -247,11 +216,11 @@ class OfficeEscapeGame {
     this.showHint("正在加载角色模型…");
     this.resize();
     this.animate();
-    void playerReady.then(() => {
+    void charactersReady.then(() => {
       this.showHint("距离下班还有 120 秒");
       this.transitionTo("playing");
     }).catch((error: unknown) => {
-      console.error("Failed to load the player model", error);
+      console.error("Failed to load character models", error);
       this.showHint("角色模型加载失败，请刷新重试");
     });
   }
@@ -1005,61 +974,6 @@ class OfficeEscapeGame {
     this.playerVisual.update(delta);
   }
 
-  private getSpriteDirection(x: number, z: number, moveX: number, moveZ: number, currentDirection: PlayerSpriteDirection): PlayerSpriteDirection {
-    const origin = new THREE.Vector3(x, 0, z).project(this.camera);
-    const target = new THREE.Vector3(x + moveX * 100, 0, z + moveZ * 100).project(this.camera);
-    const screenX = target.x - origin.x;
-    const screenY = target.y - origin.y;
-    const angle = Math.atan2(screenY, screenX);
-    const sector = this.wrapDirectionIndex(Math.round(angle / (Math.PI / 4)));
-    const currentIndex = PLAYER_SCREEN_DIRECTION_INDEX[currentDirection];
-    if (sector === currentIndex) return currentDirection;
-
-    const currentAngle = currentIndex * (Math.PI / 4);
-    const angleDelta = Math.abs(this.shortestAngleDelta(angle, currentAngle));
-    if (angleDelta < PLAYER_DIRECTION_HYSTERESIS) return currentDirection;
-    return PLAYER_SCREEN_DIRECTIONS[sector];
-  }
-
-  private wrapDirectionIndex(index: number) {
-    return (index + PLAYER_SCREEN_DIRECTIONS.length) % PLAYER_SCREEN_DIRECTIONS.length;
-  }
-
-  private shortestAngleDelta(angle: number, target: number) {
-    return Math.atan2(Math.sin(angle - target), Math.cos(angle - target));
-  }
-
-  private spriteFrameKey(direction: PlayerSpriteDirection, frame: number) {
-    return `${direction}-${frame}`;
-  }
-
-  private loadBugSpriteFrames() {
-    if (this.bugSpriteFrames.size > 0) return;
-    for (const [direction, row] of Object.entries(PLAYER_DIRECTION_ROW) as [PlayerSpriteDirection, number][]) {
-      for (let column = 0; column < PLAYER_SPRITE_COLUMNS; column += 1) {
-        const texture = this.textureLoader.load(this.bugSpriteFrameUrl(row, column));
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
-        texture.generateMipmaps = false;
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-        this.bugSpriteFrames.set(this.spriteFrameKey(direction, column), texture);
-      }
-    }
-  }
-
-  private getBugSpriteTexture(direction: PlayerSpriteDirection, frame: number) {
-    const texture = this.bugSpriteFrames.get(this.spriteFrameKey(direction, frame));
-    if (!texture) throw new Error(`Missing bug sprite frame: ${direction} ${frame}`);
-    return texture;
-  }
-
-  private bugSpriteFrameUrl(row: number, column: number) {
-    return new URL(`./assets/enemies/bug-frames/r${row}-c${column}.png`, import.meta.url).href;
-  }
-
   private updateTimeline() {
     if (!this.accessCardSpawned && this.elapsed >= 35) {
       this.accessCardSpawned = true;
@@ -1141,7 +1055,11 @@ class OfficeEscapeGame {
     const healthBarWidth = kind === "boss" ? 86 : 48;
     const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
     const healthFill = healthBar.children[1] as THREE.Mesh;
-    const visual = kind === "bug" ? this.createBugVisual() : new StaticCharacterVisual();
+    const visual = kind === "bug"
+      ? this.characterAssets.create(CHARACTER_MODELS.bug, {
+        maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
+      })
+      : new StaticCharacterVisual();
 
     if (kind === "boss") {
       this.addBossModel(visual.root, config);
@@ -1180,63 +1098,6 @@ class OfficeEscapeGame {
       visual,
     });
     this.nextEnemyId += 1;
-  }
-
-  private createBugVisual(): CharacterVisual {
-    this.loadBugSpriteFrames();
-    const material = new THREE.SpriteMaterial({
-      map: this.getBugSpriteTexture("down", 0),
-      transparent: true,
-      alphaTest: 0.05,
-      depthWrite: false,
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.position.y = 58;
-    sprite.scale.set(BUG_SPRITE_WIDTH, BUG_SPRITE_HEIGHT, 1);
-    sprite.renderOrder = 11;
-    const root = new THREE.Group();
-    root.add(sprite);
-
-    let state: CharacterAnimationState = "idle";
-    let direction: PlayerSpriteDirection = "down";
-    let movementX = 0;
-    let movementZ = 0;
-    let frame = 0;
-    let timer = Math.random() / PLAYER_WALK_FRAME_RATE;
-    const worldPosition = new THREE.Vector3();
-
-    return {
-      root,
-      setMovement: (directionX, directionZ) => {
-        movementX = directionX;
-        movementZ = directionZ;
-        state = Math.hypot(directionX, directionZ) > 0.08 ? "walk" : "idle";
-      },
-      setState: (nextState) => {
-        state = nextState;
-      },
-      update: (delta) => {
-        if (state === "walk") {
-          root.getWorldPosition(worldPosition);
-          direction = this.getSpriteDirection(worldPosition.x, worldPosition.z, movementX, movementZ, direction);
-          timer += delta;
-          const frameStep = 1 / PLAYER_WALK_FRAME_RATE;
-          while (timer >= frameStep) {
-            timer -= frameStep;
-            frame = (frame + 1) % PLAYER_SPRITE_COLUMNS;
-          }
-        } else {
-          timer = 0;
-          frame = 0;
-        }
-
-        const texture = this.getBugSpriteTexture(direction, frame);
-        if (material.map === texture) return;
-        material.map = texture;
-        material.needsUpdate = true;
-      },
-      dispose: () => {},
-    };
   }
 
   private addChangeRequestModel(group: THREE.Group, config: EnemyConfig) {

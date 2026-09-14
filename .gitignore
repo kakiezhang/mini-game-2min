@@ -9,6 +9,7 @@ dist/
 !src/assets/textures/*.png
 *.glb
 !ksman_walk_1k_meshopt.glb
+!bug_walk_1k_meshopt.glb
 *.fbx
 *.blend
 *.blend1

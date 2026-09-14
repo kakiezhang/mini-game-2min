@@ -61,7 +61,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
   bug: {
     color: COLORS.bug,
     radius: 36,
-    height: 34,
+    height: 102,
     hp: 18,
     speed: 39,
     damage: 5,
