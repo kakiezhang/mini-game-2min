@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Character Pipeline"
+  short_description: "Build and integrate animated 3D game characters"
+  default_prompt: "Use $game-character-pipeline to prepare and integrate a new animated character for this game."
