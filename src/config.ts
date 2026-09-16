@@ -80,8 +80,8 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
   },
   meeting: {
     color: COLORS.meeting,
-    radius: 18,
-    height: 40,
+    radius: 30,
+    height: 110,
     hp: 54,
     speed: 34,
     damage: 4,

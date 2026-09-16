@@ -17,6 +17,14 @@ export const CHARACTER_MODELS = {
       walk: /walk/i,
     },
   },
+  ppt: {
+    url: new URL("../../ppt_walk_1k_meshopt.glb", import.meta.url).href,
+    height: 110,
+    idlePose: 0.5,
+    clips: {
+      walk: /walk/i,
+    },
+  },
 } satisfies Record<string, CharacterModelConfig>;
 
 export type CharacterModelId = keyof typeof CHARACTER_MODELS;

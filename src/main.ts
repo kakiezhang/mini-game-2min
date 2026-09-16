@@ -100,7 +100,6 @@ const CHARACTER_TEXTURE_URLS = {
   monkeyHoodie: new URL("./assets/textures/monkey-hoodie.png", import.meta.url).href,
   oxHide: new URL("./assets/textures/ox-hide.png", import.meta.url).href,
   horseHide: new URL("./assets/textures/horse-hide.png", import.meta.url).href,
-  meetingHide: new URL("./assets/textures/meeting-hide.png", import.meta.url).href,
   bossBull: new URL("./assets/textures/boss-bull.png", import.meta.url).href,
 } as const;
 
@@ -205,6 +204,7 @@ class OfficeEscapeGame {
     const charactersReady = Promise.all([
       this.createPlayer(),
       this.characterAssets.preload(CHARACTER_MODELS.bug),
+      this.characterAssets.preload(CHARACTER_MODELS.ppt),
     ]);
     this.createFixedAmmoSupplies();
     this.createCrosshair();
@@ -1059,8 +1059,13 @@ class OfficeEscapeGame {
     const healthBarWidth = kind === "boss" ? 86 : 48;
     const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
     const healthFill = healthBar.children[1] as THREE.Mesh;
-    const visual = kind === "bug"
-      ? this.characterAssets.create(CHARACTER_MODELS.bug, {
+    const animatedModel = kind === "bug"
+      ? CHARACTER_MODELS.bug
+      : kind === "meeting"
+        ? CHARACTER_MODELS.ppt
+        : undefined;
+    const visual = animatedModel
+      ? this.characterAssets.create(animatedModel, {
         maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
       })
       : new StaticCharacterVisual();
@@ -1069,8 +1074,6 @@ class OfficeEscapeGame {
       this.addBossModel(visual.root, config);
     } else if (kind === "changeRequest") {
       this.addChangeRequestModel(visual.root, config);
-    } else if (kind === "meeting") {
-      this.addMeetingModel(visual.root, config);
     }
     group.add(visual.root);
 
@@ -1130,36 +1133,6 @@ class OfficeEscapeGame {
     const shoulderRight = shoulderLeft.clone();
     shoulderRight.position.x = 22;
     group.add(body, head, muzzle, mane, leftEar, rightEar, visor, shoulderLeft, shoulderRight);
-  }
-
-  private addMeetingModel(group: THREE.Group, config: EnemyConfig) {
-    const hide = this.characterInstanceMaterial("meetingHide");
-    const body = this.meshWithMaterial(new THREE.CylinderGeometry(config.radius * 1.08, config.radius * 1.12, config.height, 20), hide);
-    body.position.y = config.height / 2;
-    const head = this.meshWithMaterial(new THREE.SphereGeometry(1, 18, 12), hide);
-    head.scale.set(12, 11, 9);
-    head.position.set(0, config.height + 10, 7);
-    const muzzle = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xf5d0fe);
-    muzzle.scale.set(10, 4, 6);
-    muzzle.position.set(0, config.height + 7, 20);
-    const leftEar = this.mesh(new THREE.ConeGeometry(4, 13, 10), 0xe9d5ff);
-    leftEar.position.set(-10, config.height + 24, 0);
-    leftEar.rotation.z = 0.42;
-    const rightEar = leftEar.clone();
-    rightEar.position.x = 10;
-    rightEar.rotation.z = -0.42;
-    const halo = this.mesh(new THREE.TorusGeometry(config.radius * 1.15, 3, 8, 32), 0xe9d5ff);
-    halo.position.y = config.height + 18;
-    halo.rotation.x = Math.PI / 2;
-    const minutes = this.mesh(new THREE.BoxGeometry(30, 18, 5), 0xffffff, 0.72);
-    minutes.position.set(0, config.height * 0.52, 16);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(config.radius * 1.2, config.radius * 1.55, 24),
-      new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.32, depthWrite: false }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 6;
-    group.add(body, head, muzzle, leftEar, rightEar, halo, minutes, ring);
   }
 
   private addBossModel(group: THREE.Group, config: EnemyConfig) {
