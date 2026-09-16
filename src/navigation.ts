@@ -6,6 +6,17 @@ export type Obstacle = {
   active: boolean;
 };
 
+export type NavigationPerformanceMetrics = {
+  directionCalls: number;
+  reachabilityChecks: number;
+  flowRequests: number;
+  flowCacheHits: number;
+  flowRebuilds: number;
+  flowRebuildMs: number;
+  blockedGridRebuilds: number;
+  blockedGridRebuildMs: number;
+};
+
 type Point = { x: number; z: number };
 
 const NEIGHBORS = [
@@ -28,6 +39,8 @@ export class NavigationWorld {
   private obstacleVersion = 0;
   private flowVersion = -1;
   private flowTargetIndex = -1;
+  private performanceTracking = false;
+  private readonly performanceMetrics = this.createPerformanceMetrics();
 
   constructor(
     private readonly width: number,
@@ -55,11 +68,24 @@ export class NavigationWorld {
     this.obstacleVersion += 1;
   }
 
+  setPerformanceTracking(enabled: boolean) {
+    this.performanceTracking = enabled;
+  }
+
+  takePerformanceMetrics(): NavigationPerformanceMetrics {
+    const snapshot = { ...this.performanceMetrics };
+    for (const key of Object.keys(this.performanceMetrics) as Array<keyof NavigationPerformanceMetrics>) {
+      this.performanceMetrics[key] = 0;
+    }
+    return snapshot;
+  }
+
   canOccupy(x: number, z: number, radius: number) {
     return !this.isCircleBlocked(x, z, radius);
   }
 
   canReach(x: number, z: number, targetX: number, targetZ: number, radius: number) {
+    if (this.performanceTracking) this.performanceMetrics.reachabilityChecks += 1;
     this.ensureFlow(targetX, targetZ);
     const column = this.toColumn(x);
     const row = this.toRow(z);
@@ -95,6 +121,7 @@ export class NavigationWorld {
   }
 
   getDirection(x: number, z: number, targetX: number, targetZ: number, radius: number): Point {
+    if (this.performanceTracking) this.performanceMetrics.directionCalls += 1;
     const targetDistance = Math.hypot(targetX - x, targetZ - z);
     if (targetDistance <= this.cellSize * 6 && this.hasClearPath(x, z, targetX, targetZ, radius)) {
       return this.normalized(targetX - x, targetZ - z);
@@ -192,6 +219,7 @@ export class NavigationWorld {
   }
 
   private ensureFlow(targetX: number, targetZ: number) {
+    if (this.performanceTracking) this.performanceMetrics.flowRequests += 1;
     this.rebuildBlockedGrid();
     let targetColumn = this.toColumn(targetX);
     let targetRow = this.toRow(targetZ);
@@ -202,7 +230,12 @@ export class NavigationWorld {
       targetRow = openCell.row;
       targetIndex = this.index(targetColumn, targetRow);
     }
-    if (this.flowVersion === this.obstacleVersion && this.flowTargetIndex === targetIndex) return;
+    if (this.flowVersion === this.obstacleVersion && this.flowTargetIndex === targetIndex) {
+      if (this.performanceTracking) this.performanceMetrics.flowCacheHits += 1;
+      return;
+    }
+
+    const rebuildStartedAt = this.performanceTracking ? performance.now() : 0;
 
     this.distances.fill(-1);
     const queue = new Int32Array(this.columns * this.rows);
@@ -228,16 +261,38 @@ export class NavigationWorld {
 
     this.flowTargetIndex = targetIndex;
     this.flowVersion = this.obstacleVersion;
+    if (this.performanceTracking) {
+      this.performanceMetrics.flowRebuilds += 1;
+      this.performanceMetrics.flowRebuildMs += performance.now() - rebuildStartedAt;
+    }
   }
 
   private rebuildBlockedGrid() {
     if (this.flowVersion === this.obstacleVersion) return;
+    const rebuildStartedAt = this.performanceTracking ? performance.now() : 0;
     for (let row = 0; row < this.rows; row += 1) {
       for (let column = 0; column < this.columns; column += 1) {
         const center = this.cellCenter(column, row);
         this.blocked[this.index(column, row)] = this.isCircleBlocked(center.x, center.z, this.navigationClearance) ? 1 : 0;
       }
     }
+    if (this.performanceTracking) {
+      this.performanceMetrics.blockedGridRebuilds += 1;
+      this.performanceMetrics.blockedGridRebuildMs += performance.now() - rebuildStartedAt;
+    }
+  }
+
+  private createPerformanceMetrics(): NavigationPerformanceMetrics {
+    return {
+      directionCalls: 0,
+      reachabilityChecks: 0,
+      flowRequests: 0,
+      flowCacheHits: 0,
+      flowRebuilds: 0,
+      flowRebuildMs: 0,
+      blockedGridRebuilds: 0,
+      blockedGridRebuildMs: 0,
+    };
   }
 
   private canTraverse(column: number, row: number, nextColumn: number, nextRow: number) {

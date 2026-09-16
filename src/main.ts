@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import "./styles.css";
+import { EnemyAiSystem } from "./ai/enemy-ai-system";
+import type { EnemyAiRuntime } from "./ai/enemy-ai-runtime";
 import {
   CharacterAssetStore,
   StaticCharacterVisual,
@@ -27,11 +29,14 @@ import {
 } from "./config";
 import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
+import { GamePerformanceMonitor } from "./performance/game-performance-monitor";
+import { createDynamicPointLight } from "./performance/render-performance-profile";
 import { WeaponSystem } from "./weapon";
 
 type Enemy = {
   id: number;
   kind: EnemyKind;
+  ai: EnemyAiRuntime;
   group: THREE.Group;
   healthBar: THREE.Group;
   healthFill: THREE.Mesh;
@@ -127,6 +132,8 @@ class OfficeEscapeGame {
   private readonly textureLoader = new THREE.TextureLoader();
   private readonly particleGeometry = new THREE.SphereGeometry(1, 6, 4);
   private readonly characterAssets = new CharacterAssetStore();
+  private readonly enemyAi = new EnemyAiSystem(this.scene);
+  private readonly performanceMonitor = new GamePerformanceMonitor(this.navigation, this.scene);
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
@@ -866,7 +873,7 @@ class OfficeEscapeGame {
     }
 
     if (fixed) {
-      const glow = new THREE.PointLight(COLORS.ammoBox, 0.65, 180, 1.7);
+      const glow = createDynamicPointLight("ammo", COLORS.ammoBox, 0.65, 180, 1.7);
       glow.position.y = 42;
       group.add(glow);
     }
@@ -907,9 +914,25 @@ class OfficeEscapeGame {
 
   private animate = () => {
     requestAnimationFrame(this.animate);
+    this.performanceMonitor.beginFrame();
     const delta = Math.min(this.clock.getDelta(), 0.033);
+    const updateStartedAt = this.performanceMonitor.startPhase();
     this.update(delta);
+    this.performanceMonitor.finishPhase("update", updateStartedAt);
+    const renderStartedAt = this.performanceMonitor.startPhase();
     this.renderer.render(this.scene, this.camera);
+    this.performanceMonitor.finishPhase("render", renderStartedAt);
+    if (this.performanceMonitor.enabled) {
+      this.performanceMonitor.finishFrame({
+        gameElapsed: this.elapsed,
+        gameState: this.gameState,
+        enemyCount: this.enemies.length,
+        animatedEnemyCount: this.enemies.reduce((count, enemy) => (
+          count + (enemy.kind === "bug" || enemy.kind === "meeting" ? 1 : 0)
+        ), 0),
+        rendererInfo: this.renderer.info,
+      });
+    }
   };
 
   private update(delta: number) {
@@ -932,7 +955,9 @@ class OfficeEscapeGame {
     this.updateTimeline();
     this.updatePlayer(delta, input);
     this.updateBulletVisuals(delta);
+    const enemiesStartedAt = this.performanceMonitor.startPhase();
     this.updateEnemies(delta);
+    this.performanceMonitor.finishPhase("enemies", enemiesStartedAt);
     this.updateWeapon(input);
     this.updateAmmoPickups(delta);
     this.updateAccessCard();
@@ -996,7 +1021,7 @@ class OfficeEscapeGame {
     }
     if (!this.bossSpawned && this.elapsed >= 90) {
       this.bossSpawned = true;
-      this.spawnBoss();
+      this.performanceMonitor.measureSpawn("boss", this.elapsed, () => this.spawnBoss());
       this.showAlert("老板来了，立即撤离");
       this.showHint("老板来了！快跑！");
     }
@@ -1008,35 +1033,30 @@ class OfficeEscapeGame {
     const reservedBossSlots = this.bossSpawned ? 0 : 1;
     const availableSlots = Math.max(0, GAME.maxEnemies - this.enemies.length - reservedBossSlots);
     const spawnCount = Math.min(stage.count, availableSlots);
-    for (let i = 0; i < spawnCount; i += 1) this.spawnEnemy(this.pickEnemyKind(stage.weights));
+    for (let i = 0; i < spawnCount; i += 1) {
+      const kind = this.enemyAi.pickSpawnKind(stage.weights);
+      this.performanceMonitor.measureSpawn(kind, this.elapsed, () => this.spawnEnemy(kind));
+    }
     this.spawnTimer = stage.interval;
   }
 
-  private pickEnemyKind(weights: Record<Exclude<EnemyKind, "boss">, number>): Exclude<EnemyKind, "boss"> {
-    const total = weights.bug + weights.changeRequest + weights.meeting;
-    const roll = Math.random() * total;
-    if (roll < weights.bug) return "bug";
-    if (roll < weights.bug + weights.changeRequest) return "changeRequest";
-    return "meeting";
-  }
-
-  private spawnEnemy(kind: Exclude<EnemyKind, "boss">) {
+  private spawnEnemy(kind: EnemyKind) {
     const radius = ENEMY_CONFIG[kind].radius;
     const margin = Math.max(42, radius + 16);
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      const side = Math.floor(Math.random() * 4);
+      const side = this.enemyAi.randomInteger(4);
       let x = margin;
       let z = margin;
       if (side === 0) {
-        x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
+        x = this.enemyAi.randomRange(margin, MAP.width - margin);
       } else if (side === 1) {
         x = MAP.width - margin;
-        z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
+        z = this.enemyAi.randomRange(margin, MAP.depth - margin);
       } else if (side === 2) {
-        x = THREE.MathUtils.randFloat(margin, MAP.width - margin);
+        x = this.enemyAi.randomRange(margin, MAP.width - margin);
         z = MAP.depth - margin;
       } else {
-        z = THREE.MathUtils.randFloat(margin, MAP.depth - margin);
+        z = this.enemyAi.randomRange(margin, MAP.depth - margin);
       }
       if (
         this.distanceToPlayer(x, z) < 300
@@ -1054,6 +1074,7 @@ class OfficeEscapeGame {
   }
 
   private createEnemy(kind: EnemyKind, x: number, z: number) {
+    const id = this.nextEnemyId;
     const config = ENEMY_CONFIG[kind];
     const group = new THREE.Group();
     const healthBarWidth = kind === "boss" ? 86 : 48;
@@ -1083,8 +1104,9 @@ class OfficeEscapeGame {
     this.scene.add(healthBar);
 
     this.enemies.push({
-      id: this.nextEnemyId,
+      id,
       kind,
+      ai: this.enemyAi.createRuntime(id, kind, x, z, this.elapsed),
       group,
       healthBar,
       healthFill,
@@ -1098,8 +1120,8 @@ class OfficeEscapeGame {
       nextHitAt: 0,
       hitFlashUntil: 0,
       hitFlashActive: false,
-      surroundAngle: Math.random() * Math.PI * 2,
-      surroundRadius: kind === "boss" ? 0 : THREE.MathUtils.randFloat(34, 118),
+      surroundAngle: this.enemyAi.randomRange(0, Math.PI * 2),
+      surroundRadius: kind === "boss" ? 0 : this.enemyAi.randomRange(34, 118),
       separationX: 0,
       separationZ: 0,
       visual,
@@ -1161,7 +1183,7 @@ class OfficeEscapeGame {
     const rightArm = this.mesh(new THREE.BoxGeometry(13, 48, 13), 0x5a371c);
     rightArm.position.set(42, 54, 10);
     rightArm.rotation.x = -0.45;
-    const warning = new THREE.PointLight(0xff7a1a, 0.48, 210, 1.7);
+    const warning = createDynamicPointLight("boss", 0xff7a1a, 0.48, 210, 1.7);
     warning.position.y = 84;
     group.add(body, coat, head, snout, leftHorn, rightHorn, crown, tie, briefcase, rightArm, warning);
   }
@@ -1221,6 +1243,15 @@ class OfficeEscapeGame {
       );
       enemy.group.position.x = nextPosition.x;
       enemy.group.position.z = nextPosition.z;
+      this.enemyAi.recordMovement(enemy.ai, {
+        now: this.elapsed,
+        x: nextPosition.x,
+        z: nextPosition.z,
+        targetX,
+        targetZ,
+        desiredVelocityX: moveX,
+        desiredVelocityZ: moveZ,
+      }, ENEMY_CONFIG[enemy.kind].height);
       if (movementLength > 0.08) enemy.group.rotation.y = Math.atan2(moveX, moveZ);
       enemy.visual.setMovement(moveX, moveZ);
       enemy.visual.update(delta);
@@ -1508,7 +1539,7 @@ class OfficeEscapeGame {
         roughness: 0.25,
       }),
     );
-    const light = new THREE.PointLight(0xffb84d, 0.35, 120, 2);
+    const light = createDynamicPointLight("bullet", 0xffb84d, 0.35, 120, 2);
     group.add(glow, core, light);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
     group.position.set(
@@ -1555,7 +1586,7 @@ class OfficeEscapeGame {
     );
     spark.rotation.x = Math.PI / 2;
     spark.position.z = 18;
-    const light = new THREE.PointLight(0xffbd55, 1.35, 165, 1.8);
+    const light = createDynamicPointLight("muzzle", 0xffbd55, 1.35, 165, 1.8);
     flash.add(bloom, core, spark, light);
     flash.position.set(x, 40, z);
     flash.rotation.y = this.player.rotation.y;
@@ -1601,7 +1632,7 @@ class OfficeEscapeGame {
       new THREE.MeshBasicMaterial({ color: 0xffe6a3, transparent: true, opacity: 0.58, depthWrite: false }),
     );
     ring.rotation.x = -Math.PI / 2;
-    const light = new THREE.PointLight(0xffc65a, 0.65, 130, 1.8);
+    const light = createDynamicPointLight("impact", 0xffc65a, 0.65, 130, 1.8);
     light.position.y = 18;
     flash.add(ring, light);
     flash.position.set(x, 9, z);
@@ -1622,6 +1653,7 @@ class OfficeEscapeGame {
         this.disposeObject(this.bossAlertBeacon);
         this.bossAlertBeacon = undefined;
       }
+      this.enemyAi.remove(enemy.ai, this.elapsed);
       enemy.visual.dispose();
       this.disposeObject(enemy.group);
       this.disposeObject(enemy.healthBar);
@@ -1715,7 +1747,7 @@ class OfficeEscapeGame {
     this.accessCard = new THREE.Group();
     const card = this.mesh(new THREE.BoxGeometry(46, 8, 30), COLORS.accessCard);
     card.position.y = 18;
-    const glow = new THREE.PointLight(COLORS.accessCard, 0.85, 210, 1.6);
+    const glow = createDynamicPointLight("objective", COLORS.accessCard, 0.85, 210, 1.6);
     glow.position.y = 44;
     this.accessCard.add(card, glow);
     this.accessCard.position.set(270, 0, 400);
@@ -1759,7 +1791,7 @@ class OfficeEscapeGame {
     );
     core.rotation.x = -Math.PI / 2;
     core.position.y = 10.2;
-    const light = new THREE.PointLight(color, 0.86, 260, 1.6);
+    const light = createDynamicPointLight("objective", color, 0.86, 260, 1.6);
     light.position.y = 58;
     group.add(beam, ring, core, light);
     group.position.set(x, 0, z);

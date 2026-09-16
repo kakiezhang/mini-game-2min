@@ -62,6 +62,7 @@ make preview   # 预览生产构建，端口 6174
 | 鼠标移动 | 停止移动时调整瞄准 |
 | R | 换弹 |
 | 1 / 2 / 3 | 选择升级项 |
+| F3 | 开关怪物 AI 调试层 |
 
 ### 移动端
 
@@ -72,15 +73,59 @@ make preview   # 预览生产构建，端口 6174
 | 换弹按钮 | 主动换弹 |
 | 升级卡片 | 选择升级项 |
 
+## 怪物 AI 调试
+
+阶段 A 已支持可复现的怪物生成和运行时调试。参数可以组合使用：
+
+```text
+http://localhost:6173/?aiDebug=1&aiSeed=120&aiEnemy=meeting
+```
+
+- `aiDebug=1`：进入游戏时打开调试层；运行中可按 F3 开关。
+- `aiSeed=120`：固定怪物种类、出生位置和环绕参数的随机序列。
+- `aiEnemy=meeting`：强制普通刷新使用指定怪物；支持 `bug`、`changeRequest`、`meeting` 和 `boss`。
+
+## 手机端性能日志
+
+开发服务内置了同源性能日志收集接口。使用 `perf=1` 开启采集，建议先关闭 AI 可视化以获得基准数据：
+
+```text
+http://<开发机局域网 IP>:6173/?perf=1&aiSeed=120&aiEnemy=meeting
+```
+
+页面左下角出现 `PERF REC` 表示采集已开启。采集器只上报超过 50ms 的长帧、怪物生成事件和每 5 秒一次的汇总，不会逐帧发送请求。可以用 `perfThreshold=80` 调整长帧阈值。
+
+日志写入开发机的 `.performance-logs/performance-YYYY-MM-DD.jsonl`，包含：
+
+- 游戏更新、敌人更新和渲染耗时。
+- 怪物生成种类及同步生成耗时。
+- 寻路调用、流场命中／重建次数及重建耗时。
+- 敌人数、动画怪物数、draw calls、三角形、几何体和纹理数量。
+- 浏览器允许时记录 JS heap；不支持的手机浏览器会省略内存字段。
+
+日志目录已加入 `.gitignore`，仅用于本地诊断。
+
+### 动态点光源 A/B 诊断
+
+使用 `perfLights=off` 可以关闭子弹、枪口、命中、补给、Boss 和任务信标等数量会变化的点光源；发光 Mesh、固定环境灯和角色常驻灯保持不变：
+
+```text
+http://<开发机局域网 IP>:6173/?perf=1&perfLights=off
+```
+
+左下角显示 `PERF REC · LIGHTS OFF` 即表示实验组已生效。日志会额外记录当前点光源数量、可见动态点光源数量和已编译 shader program 数。省略 `perfLights=off` 时为原始基准组。
+
 ## 项目结构
 
 ```text
 .
 ├── docs/          # 需求、技术方案、数据配置、任务与开发进度
 ├── src/
+│   ├── ai/         # 怪物 AI 运行时、调试层和可复现随机
 │   ├── main.ts    # 游戏主循环、场景和玩法编排
 │   ├── config.ts  # 数值与升级配置
 │   ├── input.ts   # 键盘、指针和摇杆输入
+│   ├── performance/ # 手机端长帧与运行时指标采集
 │   ├── weapon.ts  # 枪械、弹匣和换弹状态
 │   ├── combat.ts  # 射线命中计算
 │   └── navigation.ts
