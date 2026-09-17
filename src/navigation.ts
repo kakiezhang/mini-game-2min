@@ -212,6 +212,34 @@ export class NavigationWorld {
   }
 
   /**
+   * Projects a steering vector through the same static collision rules used by
+   * actual movement. Components that point outside the map or into furniture
+   * are removed while collision-safe sliding is preserved.
+   */
+  getCollisionSafeDirection(
+    x: number,
+    z: number,
+    directionX: number,
+    directionZ: number,
+    radius: number,
+  ): Point {
+    const length = Math.hypot(directionX, directionZ);
+    if (length < 0.0001) return { x: 0, z: 0 };
+    const probeDistance = Math.max(4, Math.min(12, radius * 0.5));
+    const moved = this.moveCircle(
+      x,
+      z,
+      (directionX / length) * probeDistance,
+      (directionZ / length) * probeDistance,
+      radius,
+    );
+    return {
+      x: ((moved.x - x) / probeDistance) * length,
+      z: ((moved.z - z) / probeDistance) * length,
+    };
+  }
+
+  /**
    * The local target controls close-range steering while the flow target stays
    * shared by all chasers. This prevents per-enemy orbit points from replacing
    * the global flow-field cache.

@@ -73,6 +73,8 @@ export type EnemyAiRuntime = {
   lastProgressZ: number;
   failure: EnemyMovementFailure;
   recoveryLevel: number;
+  separationX: number;
+  separationZ: number;
   desiredVelocityX: number;
   desiredVelocityZ: number;
 };
@@ -137,6 +139,8 @@ export const createEnemyAiRuntime = (
   lastProgressZ: z,
   failure: "none",
   recoveryLevel: 0,
+  separationX: 0,
+  separationZ: 0,
   desiredVelocityX: 0,
   desiredVelocityZ: 0,
 });

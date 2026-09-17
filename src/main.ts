@@ -50,8 +50,6 @@ type Enemy = {
   nextHitAt: number;
   hitFlashUntil: number;
   hitFlashActive: boolean;
-  separationX: number;
-  separationZ: number;
   visual: CharacterVisual;
 };
 
@@ -114,7 +112,6 @@ const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
   failed: [],
 };
 
-const ENEMY_SEPARATION_INTERVAL = 0.08;
 const MAX_ACTIVE_PARTICLES = 90;
 
 class OfficeEscapeGame {
@@ -157,7 +154,6 @@ class OfficeEscapeGame {
   private bossAlertBeacon?: THREE.Group;
   private nextEnemyId = 1;
   private spawnTimer = 0;
-  private enemySeparationTimer = 0;
   private elapsed = 0;
   private gameState: GameState = "ready";
   private accessCardSpawned = false;
@@ -1122,8 +1118,6 @@ class OfficeEscapeGame {
       nextHitAt: 0,
       hitFlashUntil: 0,
       hitFlashActive: false,
-      separationX: 0,
-      separationZ: 0,
       visual,
     });
     this.nextEnemyId += 1;
@@ -1212,11 +1206,7 @@ class OfficeEscapeGame {
   }
 
   private updateEnemies(delta: number) {
-    this.enemySeparationTimer -= delta;
-    if (this.enemySeparationTimer <= 0) {
-      this.recomputeEnemySeparation();
-      this.enemySeparationTimer = ENEMY_SEPARATION_INTERVAL;
-    }
+    this.enemyAi.updateCrowd(delta);
 
     for (const enemy of this.enemies) {
       const behavior = this.enemyAi.updateBehavior(enemy.ai, this.navigation, {
@@ -1237,8 +1227,8 @@ class OfficeEscapeGame {
         flowTargetX: behavior.flowTargetX,
         flowTargetZ: behavior.flowTargetZ,
         radius: enemy.radius,
-        separationX: enemy.separationX,
-        separationZ: enemy.separationZ,
+        separationX: enemy.ai.separationX,
+        separationZ: enemy.ai.separationZ,
       });
       const moveX = direction.x;
       const moveZ = direction.z;
@@ -1283,38 +1273,6 @@ class OfficeEscapeGame {
         if (enemy.kind === "meeting") {
           this.slowUntil = Math.max(this.slowUntil, this.elapsed + 1);
           this.showFloating("减速", "#ddd6fe");
-        }
-      }
-    }
-  }
-
-  private recomputeEnemySeparation() {
-    for (const enemy of this.enemies) {
-      enemy.separationX = 0;
-      enemy.separationZ = 0;
-    }
-
-    for (let index = 0; index < this.enemies.length; index += 1) {
-      const enemy = this.enemies[index];
-      for (let otherIndex = index + 1; otherIndex < this.enemies.length; otherIndex += 1) {
-        const other = this.enemies[otherIndex];
-        const dx = enemy.group.position.x - other.group.position.x;
-        const dz = enemy.group.position.z - other.group.position.z;
-        const distanceSquared = dx * dx + dz * dz;
-        const minDistance = enemy.radius + other.radius + 30;
-        if (distanceSquared <= 0.000001 || distanceSquared >= minDistance * minDistance) continue;
-
-        const distance = Math.sqrt(distanceSquared);
-        const strength = (minDistance - distance) / minDistance;
-        const pushX = (dx / distance) * strength;
-        const pushZ = (dz / distance) * strength;
-        if (enemy.kind !== "boss") {
-          enemy.separationX += pushX;
-          enemy.separationZ += pushZ;
-        }
-        if (other.kind !== "boss") {
-          other.separationX -= pushX;
-          other.separationZ -= pushZ;
         }
       }
     }

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 6173 --strictPort",
     "build": "tsc && vite build",
-    "test:ai": "tsc -p tsconfig.ai-tests.json && node .ai-test-dist/tests/enemy-ai-telemetry.test.js && node .ai-test-dist/tests/enemy-ai-behavior.test.js",
+    "test:ai": "tsc -p tsconfig.ai-tests.json && node .ai-test-dist/tests/enemy-ai-telemetry.test.js && node .ai-test-dist/tests/enemy-ai-behavior.test.js && node .ai-test-dist/tests/enemy-crowd-movement.test.js",
     "test:navigation": "tsc -p tsconfig.navigation-tests.json && node .navigation-test-dist/tests/navigation.test.js",
     "preview": "vite preview --host 127.0.0.1 --port 6174 --strictPort",
     "remove-green": "node scripts/remove-chroma-key.mjs"

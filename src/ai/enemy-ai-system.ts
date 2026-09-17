@@ -10,6 +10,10 @@ import {
   type EnemyNoiseEvent,
 } from "./enemy-ai-behavior";
 import { EnemyAiDebugLayer } from "./enemy-ai-debug";
+import {
+  ENEMY_SEPARATION_INTERVAL,
+  recomputeEnemySeparation,
+} from "./enemy-crowd-movement.js";
 import { EnemyAiTelemetry } from "./enemy-ai-telemetry";
 import {
   getEnemyMovementDirection,
@@ -68,6 +72,7 @@ export class EnemyAiSystem {
   private readonly telemetry = new EnemyAiTelemetry();
   private readonly runtimes = new Map<number, EnemyAiRuntime>();
   private latestNoise?: EnemyNoiseEvent;
+  private separationTimer = 0;
 
   constructor(scene: THREE.Scene, search = window.location.search) {
     this.options = readEnemyAiDevelopmentOptions(search);
@@ -158,6 +163,13 @@ export class EnemyAiSystem {
     const direction = getEnemyMovementDirection(runtime, navigation, sample);
     this.telemetry.recordStateChange(runtime, previousState, sample.now);
     return direction;
+  }
+
+  updateCrowd(delta: number) {
+    this.separationTimer -= delta;
+    if (this.separationTimer > 0) return;
+    recomputeEnemySeparation(this.runtimes.values());
+    this.separationTimer = ENEMY_SEPARATION_INTERVAL;
   }
 
   recordMovement(runtime: EnemyAiRuntime, sample: EnemyMovementSample, height: number) {

@@ -1,9 +1,9 @@
-import type { NavigationWorld } from "../navigation";
+import type { NavigationWorld } from "../navigation.js";
 import {
   getEnemyRecoveryLevel,
   setEnemyAiState,
   type EnemyAiRuntime,
-} from "./enemy-ai-runtime";
+} from "./enemy-ai-runtime.js";
 
 export type EnemySteeringSample = {
   now: number;
@@ -26,6 +26,12 @@ const leaveRecoveryState = (runtime: EnemyAiRuntime, now: number) => {
   setEnemyAiState(runtime, returnState, now);
 };
 
+const limitMagnitude = (x: number, z: number, maximum: number) => {
+  const length = Math.hypot(x, z);
+  if (length <= maximum) return { x, z };
+  return { x: (x / length) * maximum, z: (z / length) * maximum };
+};
+
 export const getEnemyMovementDirection = (
   runtime: EnemyAiRuntime,
   navigation: NavigationWorld,
@@ -45,11 +51,35 @@ export const getEnemyMovementDirection = (
     sample.flowTargetZ,
     followingPatrolPath,
   );
-  const separationScale = runtime.kind === "boss" ? 0 : followingPatrolPath ? 0.8 : 1.6;
-  const normalDirection = {
-    x: baseDirection.x + sample.separationX * separationScale,
-    z: baseDirection.z + sample.separationZ * separationScale,
+  const safeSeparation = runtime.kind === "boss"
+    ? { x: 0, z: 0 }
+    : navigation.getCollisionSafeDirection(
+      sample.x,
+      sample.z,
+      sample.separationX,
+      sample.separationZ,
+      sample.radius,
+    );
+  const maximumSeparation = followingPatrolPath ? 0.5 : 0.75;
+  const separation = limitMagnitude(safeSeparation.x, safeSeparation.z, maximumSeparation);
+  const blendedDirection = {
+    x: baseDirection.x + separation.x,
+    z: baseDirection.z + separation.z,
   };
+  let normalDirection = navigation.getCollisionSafeDirection(
+    sample.x,
+    sample.z,
+    blendedDirection.x,
+    blendedDirection.z,
+    sample.radius,
+  );
+  const baseLength = Math.hypot(baseDirection.x, baseDirection.z);
+  if (
+    baseLength > 0.08
+    && normalDirection.x * baseDirection.x + normalDirection.z * baseDirection.z <= 0.08
+  ) {
+    normalDirection = baseDirection;
+  }
   const recoveryLevel = getEnemyRecoveryLevel(runtime, sample.now);
 
   if (recoveryLevel === 0) {

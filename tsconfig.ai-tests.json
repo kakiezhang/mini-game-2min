@@ -13,7 +13,10 @@
     "src/ai/enemy-patrol.ts",
     "src/ai/enemy-ai-runtime.ts",
     "src/ai/enemy-ai-telemetry.ts",
+    "src/ai/enemy-crowd-movement.ts",
+    "src/ai/enemy-movement-recovery.ts",
     "tests/enemy-ai-telemetry.test.ts",
-    "tests/enemy-ai-behavior.test.ts"
+    "tests/enemy-ai-behavior.test.ts",
+    "tests/enemy-crowd-movement.test.ts"
   ]
 }

@@ -48,6 +48,7 @@ npm run dev
 ```bash
 make dev       # 启动开发服务，端口 6173
 make build     # TypeScript 检查并构建
+make test-ai   # 运行 AI 状态、日志与人群移动测试
 make test-navigation # 运行寻路缓存、体型和动态障碍测试
 make preview   # 预览生产构建，端口 6174
 ```
@@ -109,9 +110,9 @@ http://<开发机局域网 IP>:6173/?perf=1&aiSeed=120&aiEnemy=meeting
 
 日志目录已加入 `.gitignore`，仅用于本地诊断。
 
-### 移动端动态点光源策略
+### 全平台动态点光源策略
 
-手机等粗指针触屏设备会默认关闭子弹、枪口、命中、补给、Boss 和任务信标等数量会变化的点光源，避免 Safari／WebGL 因灯光数量变化重新编译 shader 而产生长帧。发光 Mesh、固定环境灯和角色常驻灯保持不变，桌面端仍使用完整灯光效果。
+所有平台默认关闭子弹、枪口、命中、补给、Boss 和任务信标等数量会变化的点光源，避免 WebGL 因灯光数量变化重新编译 shader 而产生长帧。发光 Mesh、固定环境灯和角色常驻灯保持不变。
 
 性能诊断时可显式指定两种模式：
 
@@ -120,9 +121,9 @@ http://<开发机局域网 IP>:6173/?perf=1&perfLights=off
 http://<开发机局域网 IP>:6173/?perf=1&perfLights=on
 ```
 
-- `perfLights=off`：强制关闭动态点光源。
-- `perfLights=on`：强制开启动态点光源，用于回归对照。
-- 省略参数：移动端关闭，桌面端开启。
+- `perfLights=off`：显式关闭动态点光源。
+- `perfLights=on`：强制开启动态点光源，仅用于回归对照和后续灯光池实验。
+- 省略参数：手机和桌面端均关闭。
 
 左下角显示 `PERF REC · LIGHTS OFF` 表示当前动态点光源已关闭。日志会记录选择原因、当前点光源数量、可见动态点光源数量和已编译 shader program 数。
 
