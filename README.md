@@ -48,6 +48,7 @@ npm run dev
 ```bash
 make dev       # 启动开发服务，端口 6173
 make build     # TypeScript 检查并构建
+make test-navigation # 运行寻路缓存、体型和动态障碍测试
 make preview   # 预览生产构建，端口 6174
 ```
 
@@ -100,6 +101,9 @@ http://<开发机局域网 IP>:6173/?perf=1&aiSeed=120&aiEnemy=meeting
 - 游戏更新、敌人更新和渲染耗时。
 - 怪物生成种类及同步生成耗时。
 - 寻路调用、流场命中／重建次数及重建耗时。
+- 怪物 AI 的 failure 汇总、卡住数量和最长持续时间；异常怪物会附带 ID、种类、状态、位置、目标及恢复等级。
+- 怪物进入或恢复 `noDirection`／`insufficientProgress` 时记录一次状态转换，不逐帧重复上报。
+- 怪物持续卡住时会依次执行安全格回中、相邻格绕行和高净空绕行；恢复事件会携带实际触发的 `recoveryLevel`。
 - 敌人数、动画怪物数、draw calls、三角形、几何体和纹理数量。
 - 浏览器允许时记录 JS heap；不支持的手机浏览器会省略内存字段。
 
@@ -136,6 +140,7 @@ http://<开发机局域网 IP>:6173/?perf=1&perfLights=on
 │   ├── weapon.ts  # 枪械、弹匣和换弹状态
 │   ├── combat.ts  # 射线命中计算
 │   └── navigation.ts
+├── tests/         # 导航等可重复运行的逻辑测试
 ├── Makefile
 └── package.json
 ```

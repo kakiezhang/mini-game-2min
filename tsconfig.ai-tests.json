@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".ai-test-dist",
+    "rootDir": "."
+  },
+  "include": [
+    "src/config.ts",
+    "src/navigation.ts",
+    "src/ai/enemy-ai-config.ts",
+    "src/ai/enemy-ai-behavior.ts",
+    "src/ai/enemy-patrol.ts",
+    "src/ai/enemy-ai-runtime.ts",
+    "src/ai/enemy-ai-telemetry.ts",
+    "tests/enemy-ai-telemetry.test.ts",
+    "tests/enemy-ai-behavior.test.ts"
+  ]
+}

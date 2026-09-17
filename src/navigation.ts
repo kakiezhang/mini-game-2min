@@ -6,6 +6,8 @@ export type Obstacle = {
   active: boolean;
 };
 
+export type NavigationSizeClass = "small" | "medium" | "large";
+
 export type NavigationPerformanceMetrics = {
   directionCalls: number;
   reachabilityChecks: number;
@@ -19,6 +21,21 @@ export type NavigationPerformanceMetrics = {
 
 type Point = { x: number; z: number };
 
+type NavigationGrid = {
+  sizeClass: NavigationSizeClass;
+  clearance: number;
+  obstacleVersion: number;
+  blocked: Uint8Array;
+};
+
+type FlowField = {
+  cacheKey: string;
+  obstacleVersion: number;
+  targetIndex: number;
+  distances: Int32Array;
+  lastUsed: number;
+};
+
 const NEIGHBORS = [
   [-1, 0],
   [1, 0],
@@ -30,42 +47,51 @@ const NEIGHBORS = [
   [1, 1],
 ] as const;
 
+const NAVIGATION_CLEARANCE: Record<NavigationSizeClass, number> = {
+  small: 18,
+  medium: 30,
+  large: 36,
+};
+
+const MAX_FLOW_CACHE_ENTRIES = 24;
+
+export const getNavigationSizeClass = (radius: number): NavigationSizeClass => {
+  if (radius <= 20) return "small";
+  if (radius <= 32) return "medium";
+  return "large";
+};
+
 export class NavigationWorld {
   private readonly obstacles: Obstacle[] = [];
   private readonly columns: number;
   private readonly rows: number;
-  private readonly blocked: Uint8Array;
-  private readonly distances: Int32Array;
+  private readonly gridCache = new Map<NavigationSizeClass, NavigationGrid>();
+  private readonly flowCache = new Map<string, FlowField>();
   private obstacleVersion = 0;
-  private flowVersion = -1;
-  private flowTargetIndex = -1;
+  private flowUsageCounter = 0;
   private performanceTracking = false;
   private readonly performanceMetrics = this.createPerformanceMetrics();
 
   constructor(
     private readonly width: number,
     private readonly depth: number,
-    private readonly cellSize = 40,
-    private readonly navigationClearance = 36,
+    private readonly cellSize = 20,
   ) {
     this.columns = Math.ceil(width / cellSize);
     this.rows = Math.ceil(depth / cellSize);
-    this.blocked = new Uint8Array(this.columns * this.rows);
-    this.distances = new Int32Array(this.columns * this.rows);
-    this.distances.fill(-1);
   }
 
   addObstacle(x: number, z: number, width: number, depth: number, active = true) {
     const obstacle = { x, z, width, depth, active };
     this.obstacles.push(obstacle);
-    this.obstacleVersion += 1;
+    this.invalidateNavigationCaches();
     return obstacle;
   }
 
   setObstacleActive(obstacle: Obstacle | undefined, active: boolean) {
     if (!obstacle || obstacle.active === active) return;
     obstacle.active = active;
-    this.obstacleVersion += 1;
+    this.invalidateNavigationCaches();
   }
 
   setPerformanceTracking(enabled: boolean) {
@@ -84,21 +110,86 @@ export class NavigationWorld {
     return !this.isCircleBlocked(x, z, radius);
   }
 
+  canMoveDirectly(x: number, z: number, targetX: number, targetZ: number, radius: number) {
+    return this.hasClearPath(x, z, targetX, targetZ, radius);
+  }
+
   canReach(x: number, z: number, targetX: number, targetZ: number, radius: number) {
     if (this.performanceTracking) this.performanceMetrics.reachabilityChecks += 1;
-    this.ensureFlow(targetX, targetZ);
+    const { grid, flow } = this.ensureFlow(targetX, targetZ, radius);
     const column = this.toColumn(x);
     const row = this.toRow(z);
-    if (this.distances[this.index(column, row)] >= 0) return true;
+    if (flow.distances[this.index(column, row)] >= 0) return true;
 
     return NEIGHBORS.some(([columnOffset, rowOffset]) => {
       const nextColumn = column + columnOffset;
       const nextRow = row + rowOffset;
-      if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(column, row, nextColumn, nextRow)) return false;
-      if (this.distances[this.index(nextColumn, nextRow)] < 0) return false;
-      const waypoint = this.cellCenter(nextColumn, nextRow);
+      if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) {
+        return false;
+      }
+      if (flow.distances[this.index(nextColumn, nextRow)] < 0) return false;
+      const waypoint = this.cellCenter(nextColumn, nextRow, grid.clearance);
       return this.hasClearPath(x, z, waypoint.x, waypoint.z, radius);
     });
+  }
+
+  /**
+   * Builds a low-frequency waypoint path by descending the cached flow field.
+   * Chase steering can keep using the flow directly, while patrol/debug code
+   * gets a stable, inspectable path without maintaining a second graph.
+   */
+  findPath(x: number, z: number, targetX: number, targetZ: number, radius: number): Point[] {
+    if (this.hasClearPath(x, z, targetX, targetZ, radius)) return [{ x: targetX, z: targetZ }];
+
+    const { grid, flow } = this.ensureFlow(targetX, targetZ, radius);
+    let column = this.toColumn(x);
+    let row = this.toRow(z);
+    let distance = flow.distances[this.index(column, row)];
+    const rawPath: Point[] = [];
+
+    if (distance < 0) {
+      const entry = this.findBestFlowNeighbor(grid, flow, column, row, x, z);
+      if (!entry) return [];
+      column = entry.column;
+      row = entry.row;
+      distance = entry.distance;
+      rawPath.push(entry.waypoint);
+    }
+
+    const maximumSteps = this.columns * this.rows;
+    for (let step = 0; distance > 0 && step < maximumSteps; step += 1) {
+      let best: { column: number; row: number; distance: number; waypoint: Point } | undefined;
+      for (const [columnOffset, rowOffset] of NEIGHBORS) {
+        const nextColumn = column + columnOffset;
+        const nextRow = row + rowOffset;
+        if (!this.isInside(nextColumn, nextRow)) continue;
+        if (!this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) continue;
+        const nextDistance = flow.distances[this.index(nextColumn, nextRow)];
+        if (nextDistance < 0 || nextDistance >= distance) continue;
+        const waypoint = this.cellCenter(nextColumn, nextRow, grid.clearance);
+        if (!best || nextDistance < best.distance) {
+          best = { column: nextColumn, row: nextRow, distance: nextDistance, waypoint };
+        }
+      }
+      if (!best) return [];
+      column = best.column;
+      row = best.row;
+      distance = best.distance;
+      rawPath.push(best.waypoint);
+    }
+
+    if (distance !== 0) return [];
+    const finalWaypoint = rawPath.at(-1);
+    if (
+      !finalWaypoint
+      || (
+        Math.hypot(finalWaypoint.x - targetX, finalWaypoint.z - targetZ) > 1
+        && this.hasClearPath(finalWaypoint.x, finalWaypoint.z, targetX, targetZ, radius)
+      )
+    ) {
+      rawPath.push({ x: targetX, z: targetZ });
+    }
+    return this.compressPath(rawPath);
   }
 
   raycastObstacleDistance(x: number, z: number, directionX: number, directionZ: number, maxDistance: number) {
@@ -120,31 +211,50 @@ export class NavigationWorld {
     return { x, z };
   }
 
-  getDirection(x: number, z: number, targetX: number, targetZ: number, radius: number): Point {
+  /**
+   * The local target controls close-range steering while the flow target stays
+   * shared by all chasers. This prevents per-enemy orbit points from replacing
+   * the global flow-field cache.
+   */
+  getDirection(
+    x: number,
+    z: number,
+    targetX: number,
+    targetZ: number,
+    radius: number,
+    flowTargetX = targetX,
+    flowTargetZ = targetZ,
+    preferDirectPath = false,
+  ): Point {
     if (this.performanceTracking) this.performanceMetrics.directionCalls += 1;
     const targetDistance = Math.hypot(targetX - x, targetZ - z);
-    if (targetDistance <= this.cellSize * 6 && this.hasClearPath(x, z, targetX, targetZ, radius)) {
+    if (
+      (preferDirectPath || targetDistance <= this.cellSize * 6)
+      && this.hasClearPath(x, z, targetX, targetZ, radius)
+    ) {
       return this.normalized(targetX - x, targetZ - z);
     }
 
-    this.ensureFlow(targetX, targetZ);
+    const { grid, flow } = this.ensureFlow(flowTargetX, flowTargetZ, radius);
     const column = this.toColumn(x);
     const row = this.toRow(z);
-    const currentDistance = this.distances[this.index(column, row)];
-    const currentTargetDistance = Math.hypot(targetX - x, targetZ - z);
+    const currentDistance = flow.distances[this.index(column, row)];
+    const currentTargetDistance = Math.hypot(flowTargetX - x, flowTargetZ - z);
     const candidates: Array<{ distance: number; targetDistance: number; waypoint: Point }> = [];
 
     for (const [columnOffset, rowOffset] of NEIGHBORS) {
       const nextColumn = column + columnOffset;
       const nextRow = row + rowOffset;
-      if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(column, row, nextColumn, nextRow)) continue;
-      const distance = this.distances[this.index(nextColumn, nextRow)];
+      if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) {
+        continue;
+      }
+      const distance = flow.distances[this.index(nextColumn, nextRow)];
       if (distance < 0) continue;
-      const waypoint = this.cellCenter(nextColumn, nextRow);
+      const waypoint = this.cellCenter(nextColumn, nextRow, grid.clearance);
       if (!this.hasClearPath(x, z, waypoint.x, waypoint.z, radius)) continue;
       candidates.push({
         distance,
-        targetDistance: Math.hypot(targetX - waypoint.x, targetZ - waypoint.z),
+        targetDistance: Math.hypot(flowTargetX - waypoint.x, flowTargetZ - waypoint.z),
         waypoint,
       });
     }
@@ -157,7 +267,7 @@ export class NavigationWorld {
     // Grid routes are guaranteed between cell centers, but an agent can enter a
     // cell near an obstacle corner. Re-centering gives it a safe approach to the
     // next waypoint instead of repeatedly pushing into that corner.
-    const currentWaypoint = this.cellCenter(column, row);
+    const currentWaypoint = this.cellCenter(column, row, grid.clearance);
     if (
       Math.hypot(currentWaypoint.x - x, currentWaypoint.z - z) > 1
       && this.hasClearPath(x, z, currentWaypoint.x, currentWaypoint.z, radius)
@@ -165,9 +275,78 @@ export class NavigationWorld {
       return this.normalized(currentWaypoint.x - x, currentWaypoint.z - z);
     }
 
-    // Never fall back to steering through a wall. Remaining stationary for one
-    // frame lets a moving target or obstacle rebuild the flow field safely.
+    // Never fall back to steering through a wall. If a local orbit point is
+    // blocked, moving toward the shared chase target is still safe when visible.
     if (this.hasClearPath(x, z, targetX, targetZ, radius)) return this.normalized(targetX - x, targetZ - z);
+    if (
+      (flowTargetX !== targetX || flowTargetZ !== targetZ)
+      && this.hasClearPath(x, z, flowTargetX, flowTargetZ, radius)
+    ) {
+      return this.normalized(flowTargetX - x, flowTargetZ - z);
+    }
+    return { x: 0, z: 0 };
+  }
+
+  /**
+   * Returns a short, collision-safe escape direction for an agent that has
+   * stopped making progress. Recovery first recenters within the current cell,
+   * then advances through a reachable neighbor; prolonged failures prefer the
+   * neighbor with the most obstacle clearance.
+   */
+  getRecoveryDirection(
+    x: number,
+    z: number,
+    targetX: number,
+    targetZ: number,
+    radius: number,
+    recoveryLevel: number,
+  ): Point {
+    const { grid, flow } = this.ensureFlow(targetX, targetZ, radius);
+    const column = this.toColumn(x);
+    const row = this.toRow(z);
+    const currentWaypoint = this.cellCenter(column, row, grid.clearance);
+    const canRecenter = (
+      Math.hypot(currentWaypoint.x - x, currentWaypoint.z - z) > 1
+      && this.hasClearPath(x, z, currentWaypoint.x, currentWaypoint.z, radius)
+    );
+    if (recoveryLevel === 1 && canRecenter) {
+      return this.normalized(currentWaypoint.x - x, currentWaypoint.z - z);
+    }
+
+    const candidates: Array<{
+      flowDistance: number;
+      targetDistance: number;
+      clearance: number;
+      waypoint: Point;
+    }> = [];
+    for (const [columnOffset, rowOffset] of NEIGHBORS) {
+      const nextColumn = column + columnOffset;
+      const nextRow = row + rowOffset;
+      if (!this.isInside(nextColumn, nextRow)) continue;
+      if (!this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) continue;
+      const flowDistance = flow.distances[this.index(nextColumn, nextRow)];
+      if (flowDistance < 0) continue;
+      const waypoint = this.cellCenter(nextColumn, nextRow, grid.clearance);
+      if (!this.hasClearPath(x, z, waypoint.x, waypoint.z, radius)) continue;
+      candidates.push({
+        flowDistance,
+        targetDistance: Math.hypot(targetX - waypoint.x, targetZ - waypoint.z),
+        clearance: this.getObstacleClearance(waypoint.x, waypoint.z, radius),
+        waypoint,
+      });
+    }
+
+    candidates.sort((first, second) => {
+      if (recoveryLevel >= 3 && second.clearance !== first.clearance) {
+        return second.clearance - first.clearance;
+      }
+      return first.flowDistance - second.flowDistance
+        || first.targetDistance - second.targetDistance
+        || second.clearance - first.clearance;
+    });
+    const best = candidates[0];
+    if (best) return this.normalized(best.waypoint.x - x, best.waypoint.z - z);
+    if (canRecenter) return this.normalized(currentWaypoint.x - x, currentWaypoint.z - z);
     return { x: 0, z: 0 };
   }
 
@@ -185,6 +364,22 @@ export class NavigationWorld {
       if (deltaX * deltaX + deltaZ * deltaZ < radius * radius) return true;
     }
     return false;
+  }
+
+  private getObstacleClearance(x: number, z: number, radius: number) {
+    let clearance = Math.min(
+      x - radius,
+      this.width - x - radius,
+      z - radius,
+      this.depth - z - radius,
+    );
+    for (const obstacle of this.obstacles) {
+      if (!obstacle.active) continue;
+      const deltaX = Math.max(Math.abs(x - obstacle.x) - obstacle.width / 2, 0);
+      const deltaZ = Math.max(Math.abs(z - obstacle.z) - obstacle.depth / 2, 0);
+      clearance = Math.min(clearance, Math.hypot(deltaX, deltaZ) - radius);
+    }
+    return clearance;
   }
 
   private rayRectangleDistance(x: number, z: number, directionX: number, directionZ: number, obstacle: Obstacle) {
@@ -218,31 +413,35 @@ export class NavigationWorld {
     return true;
   }
 
-  private ensureFlow(targetX: number, targetZ: number) {
+  private ensureFlow(targetX: number, targetZ: number, radius: number) {
     if (this.performanceTracking) this.performanceMetrics.flowRequests += 1;
-    this.rebuildBlockedGrid();
+    const grid = this.ensureNavigationGrid(radius);
     let targetColumn = this.toColumn(targetX);
     let targetRow = this.toRow(targetZ);
     let targetIndex = this.index(targetColumn, targetRow);
-    if (this.blocked[targetIndex]) {
-      const openCell = this.findNearestOpenCell(targetColumn, targetRow);
+    if (grid.blocked[targetIndex]) {
+      const openCell = this.findNearestOpenCell(grid.blocked, targetColumn, targetRow);
       targetColumn = openCell.column;
       targetRow = openCell.row;
       targetIndex = this.index(targetColumn, targetRow);
     }
-    if (this.flowVersion === this.obstacleVersion && this.flowTargetIndex === targetIndex) {
+
+    const cacheKey = `${grid.sizeClass}:${targetIndex}`;
+    const cached = this.flowCache.get(cacheKey);
+    if (cached?.obstacleVersion === this.obstacleVersion) {
+      cached.lastUsed = ++this.flowUsageCounter;
       if (this.performanceTracking) this.performanceMetrics.flowCacheHits += 1;
-      return;
+      return { grid, flow: cached };
     }
 
     const rebuildStartedAt = this.performanceTracking ? performance.now() : 0;
-
-    this.distances.fill(-1);
+    const distances = new Int32Array(this.columns * this.rows);
+    distances.fill(-1);
     const queue = new Int32Array(this.columns * this.rows);
     let head = 0;
     let tail = 0;
     queue[tail++] = targetIndex;
-    this.distances[targetIndex] = 0;
+    distances[targetIndex] = 0;
 
     while (head < tail) {
       const currentIndex = queue[head++];
@@ -251,35 +450,112 @@ export class NavigationWorld {
       for (const [columnOffset, rowOffset] of NEIGHBORS) {
         const nextColumn = column + columnOffset;
         const nextRow = row + rowOffset;
-        if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(column, row, nextColumn, nextRow)) continue;
+        if (!this.isInside(nextColumn, nextRow) || !this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) {
+          continue;
+        }
         const nextIndex = this.index(nextColumn, nextRow);
-        if (this.distances[nextIndex] >= 0) continue;
-        this.distances[nextIndex] = this.distances[currentIndex] + 1;
+        if (distances[nextIndex] >= 0) continue;
+        distances[nextIndex] = distances[currentIndex] + 1;
         queue[tail++] = nextIndex;
       }
     }
 
-    this.flowTargetIndex = targetIndex;
-    this.flowVersion = this.obstacleVersion;
+    const flow: FlowField = {
+      cacheKey,
+      obstacleVersion: this.obstacleVersion,
+      targetIndex,
+      distances,
+      lastUsed: ++this.flowUsageCounter,
+    };
+    this.flowCache.set(cacheKey, flow);
+    this.trimFlowCache();
     if (this.performanceTracking) {
       this.performanceMetrics.flowRebuilds += 1;
       this.performanceMetrics.flowRebuildMs += performance.now() - rebuildStartedAt;
     }
+    return { grid, flow };
   }
 
-  private rebuildBlockedGrid() {
-    if (this.flowVersion === this.obstacleVersion) return;
+  private ensureNavigationGrid(radius: number) {
+    const sizeClass = getNavigationSizeClass(radius);
+    const cached = this.gridCache.get(sizeClass);
+    if (cached?.obstacleVersion === this.obstacleVersion) return cached;
+
     const rebuildStartedAt = this.performanceTracking ? performance.now() : 0;
+    const clearance = NAVIGATION_CLEARANCE[sizeClass];
+    const blocked = new Uint8Array(this.columns * this.rows);
     for (let row = 0; row < this.rows; row += 1) {
       for (let column = 0; column < this.columns; column += 1) {
-        const center = this.cellCenter(column, row);
-        this.blocked[this.index(column, row)] = this.isCircleBlocked(center.x, center.z, this.navigationClearance) ? 1 : 0;
+        const center = this.cellCenter(column, row, clearance);
+        blocked[this.index(column, row)] = this.isCircleBlocked(center.x, center.z, clearance) ? 1 : 0;
       }
     }
+
+    const grid = { sizeClass, clearance, obstacleVersion: this.obstacleVersion, blocked };
+    this.gridCache.set(sizeClass, grid);
     if (this.performanceTracking) {
       this.performanceMetrics.blockedGridRebuilds += 1;
       this.performanceMetrics.blockedGridRebuildMs += performance.now() - rebuildStartedAt;
     }
+    return grid;
+  }
+
+  private findBestFlowNeighbor(
+    grid: NavigationGrid,
+    flow: FlowField,
+    column: number,
+    row: number,
+    x: number,
+    z: number,
+  ) {
+    let best: { column: number; row: number; distance: number; waypoint: Point } | undefined;
+    for (const [columnOffset, rowOffset] of NEIGHBORS) {
+      const nextColumn = column + columnOffset;
+      const nextRow = row + rowOffset;
+      if (!this.isInside(nextColumn, nextRow)) continue;
+      if (!this.canTraverse(grid.blocked, column, row, nextColumn, nextRow)) continue;
+      const distance = flow.distances[this.index(nextColumn, nextRow)];
+      if (distance < 0) continue;
+      const waypoint = this.cellCenter(nextColumn, nextRow, grid.clearance);
+      if (!this.hasClearPath(x, z, waypoint.x, waypoint.z, grid.clearance)) continue;
+      if (!best || distance < best.distance) {
+        best = { column: nextColumn, row: nextRow, distance, waypoint };
+      }
+    }
+    return best;
+  }
+
+  private compressPath(path: Point[]) {
+    if (path.length < 3) return path;
+    const compressed: Point[] = [path[0]];
+    let previousDirectionX = Math.sign(path[1].x - path[0].x);
+    let previousDirectionZ = Math.sign(path[1].z - path[0].z);
+    for (let index = 1; index < path.length - 1; index += 1) {
+      const directionX = Math.sign(path[index + 1].x - path[index].x);
+      const directionZ = Math.sign(path[index + 1].z - path[index].z);
+      if (directionX !== previousDirectionX || directionZ !== previousDirectionZ) {
+        compressed.push(path[index]);
+      }
+      previousDirectionX = directionX;
+      previousDirectionZ = directionZ;
+    }
+    compressed.push(path.at(-1)!);
+    return compressed;
+  }
+
+  private invalidateNavigationCaches() {
+    this.obstacleVersion += 1;
+    this.gridCache.clear();
+    this.flowCache.clear();
+  }
+
+  private trimFlowCache() {
+    if (this.flowCache.size <= MAX_FLOW_CACHE_ENTRIES) return;
+    let oldest: FlowField | undefined;
+    for (const flow of this.flowCache.values()) {
+      if (!oldest || flow.lastUsed < oldest.lastUsed) oldest = flow;
+    }
+    if (oldest) this.flowCache.delete(oldest.cacheKey);
   }
 
   private createPerformanceMetrics(): NavigationPerformanceMetrics {
@@ -295,18 +571,24 @@ export class NavigationWorld {
     };
   }
 
-  private canTraverse(column: number, row: number, nextColumn: number, nextRow: number) {
-    if (this.blocked[this.index(nextColumn, nextRow)]) return false;
+  private canTraverse(
+    blocked: Uint8Array,
+    column: number,
+    row: number,
+    nextColumn: number,
+    nextRow: number,
+  ) {
+    if (blocked[this.index(nextColumn, nextRow)]) return false;
     const diagonal = column !== nextColumn && row !== nextRow;
     if (!diagonal) return true;
-    return !this.blocked[this.index(nextColumn, row)] && !this.blocked[this.index(column, nextRow)];
+    return !blocked[this.index(nextColumn, row)] && !blocked[this.index(column, nextRow)];
   }
 
-  private findNearestOpenCell(startColumn: number, startRow: number) {
+  private findNearestOpenCell(blocked: Uint8Array, startColumn: number, startRow: number) {
     for (let radius = 1; radius < Math.max(this.columns, this.rows); radius += 1) {
       for (let row = startRow - radius; row <= startRow + radius; row += 1) {
         for (let column = startColumn - radius; column <= startColumn + radius; column += 1) {
-          if (!this.isInside(column, row) || this.blocked[this.index(column, row)]) continue;
+          if (!this.isInside(column, row) || blocked[this.index(column, row)]) continue;
           return { column, row };
         }
       }
@@ -328,10 +610,10 @@ export class NavigationWorld {
     return Math.max(0, Math.min(this.rows - 1, Math.floor(z / this.cellSize)));
   }
 
-  private cellCenter(column: number, row: number): Point {
+  private cellCenter(column: number, row: number, clearance: number): Point {
     return {
-      x: Math.min(this.width - this.navigationClearance, (column + 0.5) * this.cellSize),
-      z: Math.min(this.depth - this.navigationClearance, (row + 0.5) * this.cellSize),
+      x: Math.min(this.width - clearance, (column + 0.5) * this.cellSize),
+      z: Math.min(this.depth - clearance, (row + 0.5) * this.cellSize),
     };
   }
 

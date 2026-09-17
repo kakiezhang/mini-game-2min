@@ -7,9 +7,15 @@ export type EnemyAiState =
   | "investigate"
   | "chase"
   | "attack"
-  | "search"
   | "stuckRecovery"
   | "dead";
+
+export type InvestigationReason =
+  | "vision"
+  | "proximity"
+  | "gunshot"
+  | "allyAlert"
+  | "lostTarget";
 
 export type PatrolZoneId =
   | "meetingRoom"
@@ -35,6 +41,8 @@ export type EnemyAiRuntime = {
   previousState: EnemyAiState;
   stateEnteredAt: number;
   homeZone: PatrolZoneId;
+  currentX: number;
+  currentZ: number;
   targetX: number;
   targetZ: number;
   lastSeenPlayerX: number;
@@ -47,6 +55,18 @@ export type EnemyAiRuntime = {
   pathIndex: number;
   approachSlotId?: number;
   nextPerceptionAt: number;
+  idleUntil: number;
+  investigationX: number;
+  investigationZ: number;
+  investigationReason?: InvestigationReason;
+  reactionUntil: number;
+  investigationExpiresAt: number;
+  patrolTargetIndex?: number;
+  facingX: number;
+  facingZ: number;
+  surroundAngle: number;
+  surroundRadius: number;
+  lastAlertAt: number;
   stuckSince?: number;
   lastProgressAt: number;
   lastProgressX: number;
@@ -85,11 +105,12 @@ export const createEnemyAiRuntime = (
 ): EnemyAiRuntime => ({
   id,
   kind,
-  // Phase A preserves the legacy behavior: every live enemy immediately chases.
-  state: "chase",
+  state: kind === "boss" ? "chase" : "patrolIdle",
   previousState: "spawning",
   stateEnteredAt: now,
   homeZone: getPatrolZoneAt(x, z),
+  currentX: x,
+  currentZ: z,
   targetX: x,
   targetZ: z,
   lastSeenPlayerX: x,
@@ -100,7 +121,17 @@ export const createEnemyAiRuntime = (
   lastHeardAt: Number.NEGATIVE_INFINITY,
   path: [],
   pathIndex: 0,
-  nextPerceptionAt: now,
+  nextPerceptionAt: now + (id % 8) * 0.015625,
+  idleUntil: now,
+  investigationX: x,
+  investigationZ: z,
+  reactionUntil: now,
+  investigationExpiresAt: now,
+  facingX: Math.sin(id * 2.399963),
+  facingZ: Math.cos(id * 2.399963),
+  surroundAngle: (id * 2.399963) % (Math.PI * 2),
+  surroundRadius: kind === "boss" ? 0 : 72,
+  lastAlertAt: Number.NEGATIVE_INFINITY,
   lastProgressAt: now,
   lastProgressX: x,
   lastProgressZ: z,
@@ -117,11 +148,27 @@ export const setEnemyAiState = (runtime: EnemyAiRuntime, state: EnemyAiState, no
   runtime.stateEnteredAt = now;
 };
 
+export const getEnemyRecoveryLevel = (runtime: EnemyAiRuntime, now: number) => {
+  if (runtime.failure === "none" || runtime.stuckSince === undefined) return 0;
+  const stuckFor = Math.max(0, now - runtime.stuckSince);
+  if (stuckFor >= 3) return 3;
+  if (stuckFor >= 1.5) return 2;
+  if (stuckFor >= 0.5) return 1;
+  return 0;
+};
+
 export const recordEnemyMovement = (runtime: EnemyAiRuntime, sample: EnemyMovementSample) => {
+  runtime.currentX = sample.x;
+  runtime.currentZ = sample.z;
   runtime.targetX = sample.targetX;
   runtime.targetZ = sample.targetZ;
   runtime.desiredVelocityX = sample.desiredVelocityX;
   runtime.desiredVelocityZ = sample.desiredVelocityZ;
+  if (Math.hypot(sample.desiredVelocityX, sample.desiredVelocityZ) > 0.08) {
+    const desiredLength = Math.hypot(sample.desiredVelocityX, sample.desiredVelocityZ);
+    runtime.facingX = sample.desiredVelocityX / desiredLength;
+    runtime.facingZ = sample.desiredVelocityZ / desiredLength;
+  }
 
   if (sample.now - runtime.lastProgressAt < STUCK_SAMPLE_INTERVAL) return;
 

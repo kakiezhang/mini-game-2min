@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .performance-logs/
+.navigation-test-dist/
+.ai-test-dist/
 .DS_Store
 *.log
 *.png

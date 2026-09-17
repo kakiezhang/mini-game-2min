@@ -45,6 +45,8 @@ type TelemetryEvent = Record<string, unknown> & {
   perfNowMs: number;
 };
 
+type PerformanceSnapshotProvider = () => Record<string, unknown>;
+
 const LONG_FRAME_THRESHOLD_MS = 50;
 const SUMMARY_INTERVAL_MS = 5000;
 const MAX_QUEUED_EVENTS = 120;
@@ -99,6 +101,7 @@ export class GamePerformanceMonitor {
   constructor(
     private readonly navigation: NavigationWorld,
     private readonly scene: THREE.Scene,
+    private readonly aiSnapshotProvider?: PerformanceSnapshotProvider,
     search = window.location.search,
   ) {
     const params = new URLSearchParams(search);
@@ -196,6 +199,7 @@ export class GamePerformanceMonitor {
         gameElapsed: round(sample.gameElapsed),
       })),
       navigation: this.roundNavigation(navigation),
+      enemyAi: this.aiSnapshotProvider?.(),
       ...this.latestRuntimeSnapshot,
       lighting: this.createLightingSnapshot(),
       memory: this.readMemory(),
@@ -229,6 +233,7 @@ export class GamePerformanceMonitor {
         renderMaximumMs: round(this.phaseMaximums.render),
       },
       navigation: this.roundNavigation(navigation),
+      enemyAi: this.aiSnapshotProvider?.(),
       ...this.latestRuntimeSnapshot,
       lighting: this.createLightingSnapshot(),
       memory: this.readMemory(),

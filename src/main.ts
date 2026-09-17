@@ -50,8 +50,6 @@ type Enemy = {
   nextHitAt: number;
   hitFlashUntil: number;
   hitFlashActive: boolean;
-  surroundAngle: number;
-  surroundRadius: number;
   separationX: number;
   separationZ: number;
   visual: CharacterVisual;
@@ -133,7 +131,11 @@ class OfficeEscapeGame {
   private readonly particleGeometry = new THREE.SphereGeometry(1, 6, 4);
   private readonly characterAssets = new CharacterAssetStore();
   private readonly enemyAi = new EnemyAiSystem(this.scene);
-  private readonly performanceMonitor = new GamePerformanceMonitor(this.navigation, this.scene);
+  private readonly performanceMonitor = new GamePerformanceMonitor(
+    this.navigation,
+    this.scene,
+    () => this.enemyAi.takePerformanceSnapshot(this.elapsed),
+  );
 
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
@@ -1120,8 +1122,6 @@ class OfficeEscapeGame {
       nextHitAt: 0,
       hitFlashUntil: 0,
       hitFlashActive: false,
-      surroundAngle: this.enemyAi.randomRange(0, Math.PI * 2),
-      surroundRadius: kind === "boss" ? 0 : this.enemyAi.randomRange(34, 118),
       separationX: 0,
       separationZ: 0,
       visual,
@@ -1219,26 +1219,37 @@ class OfficeEscapeGame {
     }
 
     for (const enemy of this.enemies) {
-      const playerDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
-      const orbitAngle = enemy.surroundAngle + this.elapsed * 0.18;
-      const targetX = playerDistance < 210 ? this.playerState.x + Math.cos(orbitAngle) * enemy.surroundRadius : this.playerState.x;
-      const targetZ = playerDistance < 210 ? this.playerState.z + Math.sin(orbitAngle) * enemy.surroundRadius : this.playerState.z;
-      const direction = this.navigation.getDirection(enemy.group.position.x, enemy.group.position.z, targetX, targetZ, enemy.radius);
-      let moveX = direction.x;
-      let moveZ = direction.z;
-
-      if (enemy.kind !== "boss") {
-        moveX += enemy.separationX * 1.6;
-        moveZ += enemy.separationZ * 1.6;
-      }
+      const behavior = this.enemyAi.updateBehavior(enemy.ai, this.navigation, {
+        now: this.elapsed,
+        x: enemy.group.position.x,
+        z: enemy.group.position.z,
+        radius: enemy.radius,
+        playerX: this.playerState.x,
+        playerZ: this.playerState.z,
+        playerRadius: PLAYER_CONFIG.radius,
+      });
+      const direction = this.enemyAi.getMovementDirection(enemy.ai, this.navigation, {
+        now: this.elapsed,
+        x: enemy.group.position.x,
+        z: enemy.group.position.z,
+        targetX: behavior.targetX,
+        targetZ: behavior.targetZ,
+        flowTargetX: behavior.flowTargetX,
+        flowTargetZ: behavior.flowTargetZ,
+        radius: enemy.radius,
+        separationX: enemy.separationX,
+        separationZ: enemy.separationZ,
+      });
+      const moveX = direction.x;
+      const moveZ = direction.z;
 
       const movementLength = Math.hypot(moveX, moveZ);
       const length = Math.max(movementLength, 0.001);
       const nextPosition = this.navigation.moveCircle(
         enemy.group.position.x,
         enemy.group.position.z,
-        (moveX / length) * enemy.speed * delta,
-        (moveZ / length) * enemy.speed * delta,
+        (moveX / length) * enemy.speed * behavior.speedMultiplier * delta,
+        (moveZ / length) * enemy.speed * behavior.speedMultiplier * delta,
         enemy.radius,
       );
       enemy.group.position.x = nextPosition.x;
@@ -1247,19 +1258,20 @@ class OfficeEscapeGame {
         now: this.elapsed,
         x: nextPosition.x,
         z: nextPosition.z,
-        targetX,
-        targetZ,
-        desiredVelocityX: moveX,
-        desiredVelocityZ: moveZ,
+        targetX: behavior.targetX,
+        targetZ: behavior.targetZ,
+        desiredVelocityX: moveX * behavior.speedMultiplier,
+        desiredVelocityZ: moveZ * behavior.speedMultiplier,
       }, ENEMY_CONFIG[enemy.kind].height);
       if (movementLength > 0.08) enemy.group.rotation.y = Math.atan2(moveX, moveZ);
-      enemy.visual.setMovement(moveX, moveZ);
+      enemy.visual.setMovement(moveX * behavior.speedMultiplier, moveZ * behavior.speedMultiplier);
       enemy.visual.update(delta);
       this.updateEnemyVisualState(enemy);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
       if (
-        contactDistance < PLAYER_CONFIG.radius + enemy.radius
+        behavior.canAttack
+        && contactDistance < PLAYER_CONFIG.radius + enemy.radius
         && this.elapsed >= enemy.nextHitAt
         && this.elapsed >= this.playerInvincibleUntil
       ) {
@@ -1436,6 +1448,7 @@ class OfficeEscapeGame {
   }
 
   private fireWeapon(directionX: number, directionZ: number) {
+    this.enemyAi.notifyGunshot(this.playerState.x, this.playerState.z, this.elapsed);
     const stats = this.weapon.getAttackStats();
     const spreadOffset = THREE.MathUtils.randFloatSpread(THREE.MathUtils.degToRad(stats.spreadDegrees));
     const spreadCos = Math.cos(spreadOffset);
@@ -1487,6 +1500,12 @@ class OfficeEscapeGame {
     for (const hit of trace.hits) {
       hit.target.hp -= request.damage;
       hit.target.hitFlashUntil = this.elapsed + 0.14;
+      this.enemyAi.notifyHit(
+        hit.target.ai,
+        this.playerState.x,
+        this.playerState.z,
+        this.elapsed,
+      );
       this.updateEnemyVisualState(hit.target);
     }
 

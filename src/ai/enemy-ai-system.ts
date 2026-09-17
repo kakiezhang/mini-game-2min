@@ -1,6 +1,20 @@
 import type * as THREE from "three";
 import type { EnemyKind } from "../config";
+import type { NavigationWorld } from "../navigation";
+import { ENEMY_AI_TIMING } from "./enemy-ai-config";
+import {
+  alertEnemyFromAlly,
+  confirmEnemyHit,
+  updateEnemyBehavior,
+  type EnemyBehaviorSample,
+  type EnemyNoiseEvent,
+} from "./enemy-ai-behavior";
 import { EnemyAiDebugLayer } from "./enemy-ai-debug";
+import { EnemyAiTelemetry } from "./enemy-ai-telemetry";
+import {
+  getEnemyMovementDirection,
+  type EnemySteeringSample,
+} from "./enemy-movement-recovery";
 import {
   createEnemyAiRuntime,
   recordEnemyMovement,
@@ -51,6 +65,9 @@ export class EnemyAiSystem {
   readonly options: EnemyAiDevelopmentOptions;
   private readonly randomSource: SeededRandom;
   private readonly debugLayer: EnemyAiDebugLayer;
+  private readonly telemetry = new EnemyAiTelemetry();
+  private readonly runtimes = new Map<number, EnemyAiRuntime>();
+  private latestNoise?: EnemyNoiseEvent;
 
   constructor(scene: THREE.Scene, search = window.location.search) {
     this.options = readEnemyAiDevelopmentOptions(search);
@@ -90,16 +107,87 @@ export class EnemyAiSystem {
   }
 
   createRuntime(id: number, kind: EnemyKind, x: number, z: number, now: number) {
-    return createEnemyAiRuntime(id, kind, x, z, now);
+    const runtime = createEnemyAiRuntime(id, kind, x, z, now);
+    runtime.idleUntil = now + this.randomRange(
+      ENEMY_AI_TIMING.patrolIdleMin,
+      ENEMY_AI_TIMING.patrolIdleMax,
+    );
+    runtime.surroundAngle = this.randomRange(0, Math.PI * 2);
+    runtime.surroundRadius = kind === "boss" ? 0 : this.randomRange(34, 118);
+    this.runtimes.set(runtime.id, runtime);
+    this.telemetry.register(runtime);
+    return runtime;
+  }
+
+  updateBehavior(
+    runtime: EnemyAiRuntime,
+    navigation: NavigationWorld,
+    sample: Omit<EnemyBehaviorSample, "latestNoise">,
+  ) {
+    const previousState = runtime.state;
+    const decision = updateEnemyBehavior(
+      runtime,
+      navigation,
+      { ...sample, latestNoise: this.latestNoise },
+      () => this.random(),
+    );
+    this.telemetry.recordStateChange(runtime, previousState, sample.now);
+    if (decision.shouldAlertAllies) {
+      this.alertAllies(runtime, sample.playerX, sample.playerZ, sample.now);
+    }
+    return decision;
+  }
+
+  notifyGunshot(x: number, z: number, now: number) {
+    this.latestNoise = { x, z, at: now };
+  }
+
+  notifyHit(runtime: EnemyAiRuntime, playerX: number, playerZ: number, now: number) {
+    const previousState = runtime.state;
+    confirmEnemyHit(runtime, playerX, playerZ, now);
+    this.telemetry.recordStateChange(runtime, previousState, now);
+    this.alertAllies(runtime, playerX, playerZ, now);
+  }
+
+  getMovementDirection(
+    runtime: EnemyAiRuntime,
+    navigation: NavigationWorld,
+    sample: EnemySteeringSample,
+  ) {
+    const previousState = runtime.state;
+    const direction = getEnemyMovementDirection(runtime, navigation, sample);
+    this.telemetry.recordStateChange(runtime, previousState, sample.now);
+    return direction;
   }
 
   recordMovement(runtime: EnemyAiRuntime, sample: EnemyMovementSample, height: number) {
+    const previousFailure = runtime.failure;
+    const previousStuckSince = runtime.stuckSince;
     recordEnemyMovement(runtime, sample);
+    this.telemetry.recordFailureChange(runtime, previousFailure, previousStuckSince, sample.now);
     this.debugLayer.update(runtime, { x: sample.x, z: sample.z, height });
+  }
+
+  takePerformanceSnapshot(now: number) {
+    return this.telemetry.takeSnapshot(now);
   }
 
   remove(runtime: EnemyAiRuntime, now: number) {
     setEnemyAiState(runtime, "dead", now);
+    this.runtimes.delete(runtime.id);
+    this.telemetry.unregister(runtime);
     this.debugLayer.remove(runtime.id);
+  }
+
+  private alertAllies(source: EnemyAiRuntime, x: number, z: number, now: number) {
+    for (const runtime of this.runtimes.values()) {
+      if (runtime === source || runtime.kind === "boss") continue;
+      if (Math.hypot(runtime.currentX - source.currentX, runtime.currentZ - source.currentZ) > ENEMY_AI_TIMING.allyAlertRadius) {
+        continue;
+      }
+      const previousState = runtime.state;
+      alertEnemyFromAlly(runtime, x, z, now);
+      this.telemetry.recordStateChange(runtime, previousState, now);
+    }
   }
 }

@@ -12,7 +12,7 @@ PLAYER_FRAME_OUTPUT ?= src/assets/characters/player-human-frames
 PLAYER_FRAME_SCALE_MODE ?= normalize-height
 PLAYER_FRAME_NORMALIZE_HEIGHT ?= 288
 
-.PHONY: install dev start build preview remove-green build-player-frames
+.PHONY: install dev start build test-ai test-navigation preview remove-green build-player-frames
 
 install:
 	npm install
@@ -24,6 +24,12 @@ start: dev
 
 build:
 	npm run build
+
+test-ai:
+	npm run test:ai
+
+test-navigation:
+	npm run test:navigation
 
 preview:
 	npm run preview -- --host $(DEV_HOST) --port $(PREVIEW_PORT) --strictPort

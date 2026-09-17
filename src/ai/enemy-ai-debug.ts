@@ -29,7 +29,6 @@ const STATE_COLORS: Record<EnemyAiRuntime["state"], number> = {
   investigate: 0xfacc15,
   chase: 0xfb923c,
   attack: 0xef4444,
-  search: 0xc084fc,
   stuckRecovery: 0xf43f5e,
   dead: 0x64748b,
 };
@@ -77,8 +76,8 @@ export class EnemyAiDebugLayer {
       ? "-"
       : `${Math.max(0, runtime.lastProgressAt - runtime.stuckSince).toFixed(1)}s`;
     const label = [
-      `#${runtime.id} ${runtime.kind} · ${runtime.state}`,
-      `zone ${runtime.homeZone} · path ${runtime.pathIndex}/${runtime.path.length} · stuck ${stuckDuration} ${runtime.failure}`,
+      `#${runtime.id} ${runtime.kind} · ${runtime.state}${runtime.state === "investigate" && runtime.investigationReason ? ` (${runtime.investigationReason})` : ""}`,
+      `zone ${runtime.homeZone} · path ${runtime.pathIndex}/${runtime.path.length} · seen ${Number.isFinite(runtime.lastSeenAt) ? runtime.lastSeenAt.toFixed(1) : "-"} · stuck ${stuckDuration} ${runtime.failure}`,
     ].join("\n");
 
     if (label !== visual.lastLabel) {
@@ -193,7 +192,7 @@ export class EnemyAiDebugLayer {
       "white-space:pre",
     ].join(";");
     const forcedKind = this.options.forcedKind ?? "weighted";
-    this.panel.textContent = `ENEMY AI DEBUG · F3\nseed ${this.options.seed} · spawn ${forcedKind}\nlegacy chase · path data pending phase B`;
+    this.panel.textContent = `ENEMY AI DEBUG · F3\nseed ${this.options.seed} · spawn ${forcedKind}\npatrol · investigation reason · chase memory · recovery`;
     document.body.append(this.panel);
     this.syncVisibility();
   }
