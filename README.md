@@ -105,15 +105,22 @@ http://<开发机局域网 IP>:6173/?perf=1&aiSeed=120&aiEnemy=meeting
 
 日志目录已加入 `.gitignore`，仅用于本地诊断。
 
-### 动态点光源 A/B 诊断
+### 移动端动态点光源策略
 
-使用 `perfLights=off` 可以关闭子弹、枪口、命中、补给、Boss 和任务信标等数量会变化的点光源；发光 Mesh、固定环境灯和角色常驻灯保持不变：
+手机等粗指针触屏设备会默认关闭子弹、枪口、命中、补给、Boss 和任务信标等数量会变化的点光源，避免 Safari／WebGL 因灯光数量变化重新编译 shader 而产生长帧。发光 Mesh、固定环境灯和角色常驻灯保持不变，桌面端仍使用完整灯光效果。
+
+性能诊断时可显式指定两种模式：
 
 ```text
 http://<开发机局域网 IP>:6173/?perf=1&perfLights=off
+http://<开发机局域网 IP>:6173/?perf=1&perfLights=on
 ```
 
-左下角显示 `PERF REC · LIGHTS OFF` 即表示实验组已生效。日志会额外记录当前点光源数量、可见动态点光源数量和已编译 shader program 数。省略 `perfLights=off` 时为原始基准组。
+- `perfLights=off`：强制关闭动态点光源。
+- `perfLights=on`：强制开启动态点光源，用于回归对照。
+- 省略参数：移动端关闭，桌面端开启。
+
+左下角显示 `PERF REC · LIGHTS OFF` 表示当前动态点光源已关闭。日志会记录选择原因、当前点光源数量、可见动态点光源数量和已编译 shader program 数。
 
 ## 项目结构
 

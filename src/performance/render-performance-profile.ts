@@ -9,11 +9,29 @@ export type DynamicPointLightCategory =
   | "objective";
 
 export type DynamicPointLightMode = "normal" | "disabled";
+export type DynamicPointLightReason = "desktop-default" | "mobile-default" | "query-on" | "query-off";
 
 const params = new URLSearchParams(window.location.search);
+const requestedLightMode = params.get("perfLights");
+const mobileLike = navigator.maxTouchPoints > 0 && window.matchMedia("(pointer: coarse)").matches;
+
+const resolveDynamicPointLights = (): {
+  mode: DynamicPointLightMode;
+  reason: DynamicPointLightReason;
+} => {
+  if (requestedLightMode === "on") return { mode: "normal", reason: "query-on" };
+  if (requestedLightMode === "off") return { mode: "disabled", reason: "query-off" };
+  return mobileLike
+    ? { mode: "disabled", reason: "mobile-default" }
+    : { mode: "normal", reason: "desktop-default" };
+};
+
+const dynamicPointLightProfile = resolveDynamicPointLights();
 
 export const renderPerformanceProfile = Object.freeze({
-  dynamicPointLights: (params.get("perfLights") === "off" ? "disabled" : "normal") as DynamicPointLightMode,
+  dynamicPointLights: dynamicPointLightProfile.mode,
+  dynamicPointLightsReason: dynamicPointLightProfile.reason,
+  mobileLike,
 });
 
 export const createDynamicPointLight = (
