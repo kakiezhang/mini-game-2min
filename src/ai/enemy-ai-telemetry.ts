@@ -57,6 +57,7 @@ const createEnemyDetails = (runtime: EnemyAiRuntime, now: number) => ({
   failure: runtime.failure,
   stuckForSeconds: round(getStuckDuration(now, runtime.stuckSince)),
   recoveryLevel: runtime.recoveryLevel,
+  approachSlotId: runtime.approachSlotId,
   position: {
     x: round(runtime.currentX),
     z: round(runtime.currentZ),

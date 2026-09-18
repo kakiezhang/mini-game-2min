@@ -9,6 +9,7 @@
     "src/config.ts",
     "src/navigation.ts",
     "src/ai/enemy-ai-config.ts",
+    "src/ai/enemy-approach-slots.ts",
     "src/ai/enemy-ai-behavior.ts",
     "src/ai/enemy-patrol.ts",
     "src/ai/enemy-ai-runtime.ts",
@@ -17,6 +18,7 @@
     "src/ai/enemy-movement-recovery.ts",
     "tests/enemy-ai-telemetry.test.ts",
     "tests/enemy-ai-behavior.test.ts",
+    "tests/enemy-approach-slots.test.ts",
     "tests/enemy-crowd-movement.test.ts"
   ]
 }

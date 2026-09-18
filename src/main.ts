@@ -1206,7 +1206,13 @@ class OfficeEscapeGame {
   }
 
   private updateEnemies(delta: number) {
-    this.enemyAi.updateCrowd(delta);
+    this.enemyAi.updateCrowd(
+      delta,
+      this.navigation,
+      this.playerState.x,
+      this.playerState.z,
+      PLAYER_CONFIG.radius,
+    );
 
     for (const enemy of this.enemies) {
       const behavior = this.enemyAi.updateBehavior(enemy.ai, this.navigation, {

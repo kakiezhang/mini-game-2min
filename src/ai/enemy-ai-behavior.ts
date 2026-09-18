@@ -1,5 +1,6 @@
 import type { NavigationWorld } from "../navigation.js";
 import { ENEMY_AI_TIMING, ENEMY_PERCEPTION } from "./enemy-ai-config.js";
+import type { ApproachSlotTarget } from "./enemy-approach-slots.js";
 import { choosePatrolTarget } from "./enemy-patrol.js";
 import {
   setEnemyAiState,
@@ -22,6 +23,7 @@ export type EnemyBehaviorSample = {
   playerX: number;
   playerZ: number;
   playerRadius: number;
+  approachTarget?: ApproachSlotTarget;
   latestNoise?: EnemyNoiseEvent;
 };
 
@@ -334,10 +336,9 @@ export const updateEnemyBehavior = (
   } else if (state === "chase" || state === "attack") {
     flowTargetX = hasFreshSight || runtime.kind === "boss" ? sample.playerX : runtime.lastSeenPlayerX;
     flowTargetZ = hasFreshSight || runtime.kind === "boss" ? sample.playerZ : runtime.lastSeenPlayerZ;
-    const orbitAngle = runtime.surroundAngle + sample.now * 0.18;
-    if (playerDistance < 210 && runtime.surroundRadius > 0) {
-      targetX = flowTargetX + Math.cos(orbitAngle) * runtime.surroundRadius;
-      targetZ = flowTargetZ + Math.sin(orbitAngle) * runtime.surroundRadius;
+    if ((hasFreshSight || runtime.kind === "boss") && sample.approachTarget) {
+      targetX = sample.approachTarget.x;
+      targetZ = sample.approachTarget.z;
     } else {
       targetX = flowTargetX;
       targetZ = flowTargetZ;

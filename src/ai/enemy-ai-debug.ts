@@ -77,7 +77,7 @@ export class EnemyAiDebugLayer {
       : `${Math.max(0, runtime.lastProgressAt - runtime.stuckSince).toFixed(1)}s`;
     const label = [
       `#${runtime.id} ${runtime.kind} · ${runtime.state}${runtime.state === "investigate" && runtime.investigationReason ? ` (${runtime.investigationReason})` : ""}`,
-      `zone ${runtime.homeZone} · path ${runtime.pathIndex}/${runtime.path.length} · seen ${Number.isFinite(runtime.lastSeenAt) ? runtime.lastSeenAt.toFixed(1) : "-"} · stuck ${stuckDuration} ${runtime.failure}`,
+      `zone ${runtime.homeZone} · slot ${runtime.approachSlotId ?? "-"} · path ${runtime.pathIndex}/${runtime.path.length} · seen ${Number.isFinite(runtime.lastSeenAt) ? runtime.lastSeenAt.toFixed(1) : "-"} · stuck ${stuckDuration} ${runtime.failure}`,
     ].join("\n");
 
     if (label !== visual.lastLabel) {

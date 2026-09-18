@@ -3,6 +3,11 @@ import type { EnemyKind } from "../config";
 import type { NavigationWorld } from "../navigation";
 import { ENEMY_AI_TIMING } from "./enemy-ai-config";
 import {
+  ENEMY_APPROACH_SLOT_INTERVAL,
+  assignEnemyApproachSlots,
+  getEnemyApproachSlotTarget,
+} from "./enemy-approach-slots.js";
+import {
   alertEnemyFromAlly,
   confirmEnemyHit,
   updateEnemyBehavior,
@@ -74,6 +79,20 @@ export class EnemyAiSystem {
   private readonly runtimes = new Map<number, EnemyAiRuntime>();
   private latestNoise?: EnemyNoiseEvent;
   private separationTimer = 0;
+  private approachSlotTimer = 0;
+  private approachSlotEvents = {
+    assignmentUpdates: 0,
+    assignmentChanges: 0,
+    invalidations: 0,
+    releases: 0,
+  };
+  private approachSlotCounts = {
+    eligibleEnemies: 0,
+    assignedEnemies: 0,
+    firstRingAssignments: 0,
+    secondRingAssignments: 0,
+    unassignedEnemies: 0,
+  };
   private crowdMetrics = {
     pairChecks: 0,
     overlapPairs: 0,
@@ -143,10 +162,16 @@ export class EnemyAiSystem {
     sample: Omit<EnemyBehaviorSample, "latestNoise">,
   ) {
     const previousState = runtime.state;
+    const approachTarget = getEnemyApproachSlotTarget(
+      runtime,
+      sample.playerX,
+      sample.playerZ,
+      sample.playerRadius,
+    );
     const decision = updateEnemyBehavior(
       runtime,
       navigation,
-      { ...sample, latestNoise: this.latestNoise },
+      { ...sample, approachTarget, latestNoise: this.latestNoise },
       () => this.random(),
     );
     this.telemetry.recordStateChange(runtime, previousState, sample.now);
@@ -178,7 +203,36 @@ export class EnemyAiSystem {
     return direction;
   }
 
-  updateCrowd(delta: number) {
+  updateCrowd(
+    delta: number,
+    navigation: NavigationWorld,
+    playerX: number,
+    playerZ: number,
+    playerRadius: number,
+  ) {
+    this.approachSlotTimer -= delta;
+    if (this.approachSlotTimer <= 0) {
+      const assignments = assignEnemyApproachSlots(
+        this.runtimes.values(),
+        navigation,
+        playerX,
+        playerZ,
+        playerRadius,
+      );
+      this.approachSlotCounts = {
+        eligibleEnemies: assignments.eligibleEnemies,
+        assignedEnemies: assignments.assignedEnemies,
+        firstRingAssignments: assignments.firstRingAssignments,
+        secondRingAssignments: assignments.secondRingAssignments,
+        unassignedEnemies: assignments.unassignedEnemies,
+      };
+      this.approachSlotEvents.assignmentUpdates += 1;
+      this.approachSlotEvents.assignmentChanges += assignments.assignmentChanges;
+      this.approachSlotEvents.invalidations += assignments.invalidations;
+      this.approachSlotEvents.releases += assignments.releases;
+      this.approachSlotTimer = ENEMY_APPROACH_SLOT_INTERVAL;
+    }
+
     this.separationTimer -= delta;
     if (this.separationTimer > 0) return;
     recomputeEnemySeparation(this.runtimes.values());
@@ -221,15 +275,20 @@ export class EnemyAiSystem {
 
   takePerformanceSnapshot(now: number) {
     const crowd = { ...this.crowdMetrics };
+    const approachSlots = { ...this.approachSlotCounts, ...this.approachSlotEvents };
     for (const key of Object.keys(this.crowdMetrics) as Array<keyof typeof this.crowdMetrics>) {
       this.crowdMetrics[key] = 0;
     }
-    return { ...this.telemetry.takeSnapshot(now), crowd };
+    for (const key of Object.keys(this.approachSlotEvents) as Array<keyof typeof this.approachSlotEvents>) {
+      this.approachSlotEvents[key] = 0;
+    }
+    return { ...this.telemetry.takeSnapshot(now), crowd, approachSlots };
   }
 
   remove(runtime: EnemyAiRuntime, now: number) {
     setEnemyAiState(runtime, "dead", now);
     this.runtimes.delete(runtime.id);
+    runtime.approachSlotId = undefined;
     this.telemetry.unregister(runtime);
     this.debugLayer.remove(runtime.id);
   }

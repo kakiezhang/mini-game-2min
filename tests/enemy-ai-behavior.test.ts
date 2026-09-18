@@ -142,6 +142,21 @@ const testPatrolDoesNotSkipThroughObstacle = () => {
   assertEqual(decision.targetX, 140, "patrol must not shortcut through an obstacle");
 };
 
+const testChaseUsesStableApproachTarget = () => {
+  const navigation = new NavigationWorld(1080, 1720);
+  const runtime = createEnemyAiRuntime(8, "changeRequest", 100, 100, 0);
+  confirmEnemyHit(runtime, 500, 100, 0);
+
+  const decision = updateEnemyBehavior(runtime, navigation, {
+    ...createSample(0.1, 500, 100),
+    approachTarget: { slotId: 0, ring: 0, x: 453, z: 100 },
+  }, () => 0);
+
+  assertEqual(decision.targetX, 453, "a confirmed chaser should use its stable approach slot");
+  assertEqual(decision.targetZ, 100, "the local target should match the assigned slot");
+  assertEqual(decision.flowTargetX, 500, "approach slots must retain the shared player flow target");
+};
+
 testPatrolAndVisionReaction();
 testWallBlocksVision();
 testGunshotAndHitResponses();
@@ -149,5 +164,6 @@ testBriefVisualLossStaysInInvestigation();
 testLostTargetInvestigatesThenPatrols();
 testPatrolSkipsToFarthestDirectWaypoint();
 testPatrolDoesNotSkipThroughObstacle();
+testChaseUsesStableApproachTarget();
 
 console.log("enemy AI behavior tests passed");
