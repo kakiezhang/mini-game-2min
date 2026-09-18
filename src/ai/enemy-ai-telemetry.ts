@@ -2,9 +2,11 @@ import type {
   EnemyAiRuntime,
   EnemyAiState,
   EnemyMovementFailure,
+  EnemyMovementFailureCause,
 } from "./enemy-ai-runtime";
 
 type FailureCounts = Record<EnemyMovementFailure, number>;
+type FailureCauseCounts = Record<EnemyMovementFailureCause, number>;
 type StateCounts = Record<EnemyAiState, number>;
 
 type EnemyStateTransition = {
@@ -25,6 +27,8 @@ type EnemyFailureTransition = {
   state: EnemyAiRuntime["state"];
   from: EnemyMovementFailure;
   to: EnemyMovementFailure;
+  fromCause: EnemyMovementFailureCause;
+  toCause: EnemyMovementFailureCause;
   stuckForSeconds: number;
   position: { x: number; z: number };
   target: { x: number; z: number };
@@ -55,6 +59,7 @@ const createEnemyDetails = (runtime: EnemyAiRuntime, now: number) => ({
   state: runtime.state,
   investigationReason: getActiveInvestigationReason(runtime),
   failure: runtime.failure,
+  failureCause: runtime.failureCause,
   stuckForSeconds: round(getStuckDuration(now, runtime.stuckSince)),
   recoveryLevel: runtime.recoveryLevel,
   approachSlotId: runtime.approachSlotId,
@@ -85,10 +90,11 @@ export class EnemyAiTelemetry {
   recordFailureChange(
     runtime: EnemyAiRuntime,
     previousFailure: EnemyMovementFailure,
+    previousFailureCause: EnemyMovementFailureCause,
     previousStuckSince: number | undefined,
     now: number,
   ) {
-    if (previousFailure === runtime.failure) return;
+    if (previousFailure === runtime.failure && previousFailureCause === runtime.failureCause) return;
     const stuckSince = runtime.failure === "none"
       ? previousStuckSince
       : runtime.stuckSince;
@@ -99,6 +105,8 @@ export class EnemyAiTelemetry {
       state: runtime.state,
       from: previousFailure,
       to: runtime.failure,
+      fromCause: previousFailureCause,
+      toCause: runtime.failureCause,
       stuckForSeconds: round(getStuckDuration(now, stuckSince)),
       position: {
         x: round(runtime.currentX),
@@ -140,6 +148,16 @@ export class EnemyAiTelemetry {
       noDirection: 0,
       insufficientProgress: 0,
     };
+    const failureCauseCounts: FailureCauseCounts = {
+      none: 0,
+      noFlowDirection: 0,
+      blockedWaypoint: 0,
+      staticCollision: 0,
+      crowdBlocked: 0,
+      invalidSlot: 0,
+      visualOnly: 0,
+      unclassified: 0,
+    };
     const stateCounts: StateCounts = {
       spawning: 0,
       patrolIdle: 0,
@@ -157,6 +175,7 @@ export class EnemyAiTelemetry {
     for (const runtime of this.runtimes.values()) {
       stateCounts[runtime.state] += 1;
       failureCounts[runtime.failure] += 1;
+      failureCauseCounts[runtime.failureCause] += 1;
       maxRecoveryLevel = Math.max(maxRecoveryLevel, runtime.recoveryLevel);
       if (runtime.failure === "none") continue;
       const details = createEnemyDetails(runtime, now);
@@ -170,6 +189,7 @@ export class EnemyAiTelemetry {
       activeEnemyCount: this.runtimes.size,
       stateCounts,
       failureCounts,
+      failureCauseCounts,
       stuckEnemyCount: affectedEnemies.length,
       longestStuckSeconds: round(longestStuckSeconds),
       maxRecoveryLevel,

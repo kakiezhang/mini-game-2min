@@ -22,7 +22,15 @@ import {
 } from "./enemy-crowd-movement.js";
 import { EnemyAiTelemetry } from "./enemy-ai-telemetry";
 import {
+  classifyEnemyMovementFailureCause,
+  EnemyMovementFailureEvidence,
+  findEnemyMovementBlocker,
+  getEnemyCrowdYieldDirection,
+  shouldEnemyYieldToBlocker,
+} from "./enemy-movement-failure.js";
+import {
   getEnemyMovementDirection,
+  type EnemyMovementDirection,
   type EnemySteeringSample,
 } from "./enemy-movement-recovery";
 import {
@@ -44,6 +52,7 @@ export type EnemyAiDevelopmentOptions = {
 };
 
 const ENEMY_KINDS = new Set<EnemyKind>(["bug", "changeRequest", "meeting", "boss"]);
+const CROWD_YIELD_DURATION = 1.5;
 
 const createRuntimeSeed = () => {
   const values = new Uint32Array(1);
@@ -76,7 +85,9 @@ export class EnemyAiSystem {
   private readonly randomSource: SeededRandom;
   private readonly debugLayer: EnemyAiDebugLayer;
   private readonly telemetry = new EnemyAiTelemetry();
+  private readonly movementFailureEvidence = new EnemyMovementFailureEvidence();
   private readonly runtimes = new Map<number, EnemyAiRuntime>();
+  private readonly crowdYields = new Map<number, { blockerId: number; until: number }>();
   private latestNoise?: EnemyNoiseEvent;
   private separationTimer = 0;
   private approachSlotTimer = 0;
@@ -85,6 +96,8 @@ export class EnemyAiSystem {
     assignmentChanges: 0,
     invalidations: 0,
     releases: 0,
+    invalidTargetMisses: 0,
+    capacityMisses: 0,
   };
   private approachSlotCounts = {
     eligibleEnemies: 0,
@@ -98,6 +111,9 @@ export class EnemyAiSystem {
     overlapPairs: 0,
     correctionApplications: 0,
     recoveryPriorityPairs: 0,
+    dualRecoveryYieldPairs: 0,
+    recoveryYieldStarts: 0,
+    maximumActiveYields: 0,
     forwardProgressConstraints: 0,
     blockedCorrections: 0,
     maximumOverlap: 0,
@@ -199,8 +215,19 @@ export class EnemyAiSystem {
   ) {
     const previousState = runtime.state;
     const direction = getEnemyMovementDirection(runtime, navigation, sample);
+    const failureCause = classifyEnemyMovementFailureCause(
+      runtime,
+      navigation,
+      sample,
+      direction,
+      this.runtimes.values(),
+    );
+    this.movementFailureEvidence.record(
+      runtime.id,
+      failureCause,
+    );
     this.telemetry.recordStateChange(runtime, previousState, sample.now);
-    return direction;
+    return this.applyCrowdYield(runtime, navigation, sample, direction, failureCause);
   }
 
   updateCrowd(
@@ -230,6 +257,8 @@ export class EnemyAiSystem {
       this.approachSlotEvents.assignmentChanges += assignments.assignmentChanges;
       this.approachSlotEvents.invalidations += assignments.invalidations;
       this.approachSlotEvents.releases += assignments.releases;
+      this.approachSlotEvents.invalidTargetMisses += assignments.invalidTargetMisses;
+      this.approachSlotEvents.capacityMisses += assignments.capacityMisses;
       this.approachSlotTimer = ENEMY_APPROACH_SLOT_INTERVAL;
     }
 
@@ -245,6 +274,7 @@ export class EnemyAiSystem {
     this.crowdMetrics.overlapPairs += resolution.overlapPairs;
     this.crowdMetrics.correctionApplications += resolution.correctionApplications;
     this.crowdMetrics.recoveryPriorityPairs += resolution.recoveryPriorityPairs;
+    this.crowdMetrics.dualRecoveryYieldPairs += resolution.dualRecoveryYieldPairs;
     this.crowdMetrics.forwardProgressConstraints += resolution.forwardProgressConstraints;
     this.crowdMetrics.blockedCorrections += resolution.blockedCorrections;
     this.crowdMetrics.maximumOverlap = Math.max(
@@ -267,9 +297,23 @@ export class EnemyAiSystem {
 
   recordMovement(runtime: EnemyAiRuntime, sample: EnemyMovementSample, height: number) {
     const previousFailure = runtime.failure;
+    const previousFailureCause = runtime.failureCause;
     const previousStuckSince = runtime.stuckSince;
-    recordEnemyMovement(runtime, sample);
-    this.telemetry.recordFailureChange(runtime, previousFailure, previousStuckSince, sample.now);
+    const previousProgressAt = runtime.lastProgressAt;
+    recordEnemyMovement(runtime, {
+      ...sample,
+      failureCause: this.movementFailureEvidence.peek(runtime.id),
+    });
+    if (runtime.lastProgressAt !== previousProgressAt) {
+      this.movementFailureEvidence.reset(runtime.id);
+    }
+    this.telemetry.recordFailureChange(
+      runtime,
+      previousFailure,
+      previousFailureCause,
+      previousStuckSince,
+      sample.now,
+    );
     this.debugLayer.update(runtime, { x: sample.x, z: sample.z, height });
   }
 
@@ -289,8 +333,55 @@ export class EnemyAiSystem {
     setEnemyAiState(runtime, "dead", now);
     this.runtimes.delete(runtime.id);
     runtime.approachSlotId = undefined;
+    runtime.approachSlotFailure = "none";
+    this.movementFailureEvidence.reset(runtime.id);
+    this.crowdYields.delete(runtime.id);
     this.telemetry.unregister(runtime);
     this.debugLayer.remove(runtime.id);
+  }
+
+  private applyCrowdYield(
+    runtime: EnemyAiRuntime,
+    navigation: NavigationWorld,
+    sample: EnemySteeringSample,
+    direction: EnemyMovementDirection,
+    failureCause: ReturnType<typeof classifyEnemyMovementFailureCause>,
+  ) {
+    let activeYield = this.crowdYields.get(runtime.id);
+    if (activeYield && activeYield.until <= sample.now) {
+      this.crowdYields.delete(runtime.id);
+      activeYield = undefined;
+    }
+
+    const isCrowdRecovery = runtime.state === "stuckRecovery"
+      && (runtime.failureCause === "crowdBlocked" || failureCause === "crowdBlocked");
+    if (isCrowdRecovery) {
+      const blocker = findEnemyMovementBlocker(
+        runtime,
+        this.runtimes.values(),
+        sample,
+        direction,
+      );
+      if (blocker && shouldEnemyYieldToBlocker(runtime, blocker)) {
+        if (!activeYield || activeYield.blockerId !== blocker.id) {
+          activeYield = { blockerId: blocker.id, until: sample.now + CROWD_YIELD_DURATION };
+          this.crowdYields.set(runtime.id, activeYield);
+          this.crowdMetrics.recoveryYieldStarts += 1;
+          this.crowdMetrics.maximumActiveYields = Math.max(
+            this.crowdMetrics.maximumActiveYields,
+            this.crowdYields.size,
+          );
+        }
+      }
+    }
+
+    if (!activeYield) return direction;
+    const blocker = this.runtimes.get(activeYield.blockerId);
+    if (!blocker) {
+      this.crowdYields.delete(runtime.id);
+      return direction;
+    }
+    return getEnemyCrowdYieldDirection(runtime, blocker, navigation, sample, direction);
   }
 
   private alertAllies(source: EnemyAiRuntime, x: number, z: number, now: number) {

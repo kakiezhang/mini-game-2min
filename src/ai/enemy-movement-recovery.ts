@@ -18,6 +18,15 @@ export type EnemySteeringSample = {
   separationZ: number;
 };
 
+export type EnemyMovementDirection = {
+  x: number;
+  z: number;
+  baseX: number;
+  baseZ: number;
+  safeX: number;
+  safeZ: number;
+};
+
 const leaveRecoveryState = (runtime: EnemyAiRuntime, now: number) => {
   if (runtime.state !== "stuckRecovery") return;
   const returnState = runtime.previousState === "stuckRecovery"
@@ -81,11 +90,18 @@ export const getEnemyMovementDirection = (
     normalDirection = baseDirection;
   }
   const recoveryLevel = getEnemyRecoveryLevel(runtime, sample.now);
+  const withDiagnostics = (direction: { x: number; z: number }): EnemyMovementDirection => ({
+    ...direction,
+    baseX: baseDirection.x,
+    baseZ: baseDirection.z,
+    safeX: normalDirection.x,
+    safeZ: normalDirection.z,
+  });
 
   if (recoveryLevel === 0) {
     runtime.recoveryLevel = 0;
     leaveRecoveryState(runtime, sample.now);
-    return normalDirection;
+    return withDiagnostics(normalDirection);
   }
 
   runtime.recoveryLevel = recoveryLevel;
@@ -99,7 +115,7 @@ export const getEnemyMovementDirection = (
     recoveryLevel,
   );
   if (Math.hypot(recoveryDirection.x, recoveryDirection.z) > 0.08) {
-    return recoveryDirection;
+    return withDiagnostics(recoveryDirection);
   }
-  return normalDirection;
+  return withDiagnostics(normalDirection);
 };

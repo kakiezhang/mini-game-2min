@@ -15,6 +15,7 @@ const testFailureSnapshotsAndTransitions = () => {
   telemetry.register(runtime);
 
   const previousFailure = runtime.failure;
+  const previousFailureCause = runtime.failureCause;
   const previousStuckSince = runtime.stuckSince;
   recordEnemyMovement(runtime, {
     now: 0.5,
@@ -24,12 +25,14 @@ const testFailureSnapshotsAndTransitions = () => {
     targetZ: 220,
     desiredVelocityX: 1,
     desiredVelocityZ: 0,
+    failureCause: "crowdBlocked",
   });
-  telemetry.recordFailureChange(runtime, previousFailure, previousStuckSince, 0.5);
+  telemetry.recordFailureChange(runtime, previousFailure, previousFailureCause, previousStuckSince, 0.5);
 
   const stuckSnapshot = telemetry.takeSnapshot(1);
   assertEqual(stuckSnapshot.activeEnemyCount, 1, "the registered enemy should be counted");
   assertEqual(stuckSnapshot.failureCounts.insufficientProgress, 1, "the failure aggregate should count the enemy");
+  assertEqual(stuckSnapshot.failureCauseCounts.crowdBlocked, 1, "the cause aggregate should classify the blocker");
   assertEqual(stuckSnapshot.stateCounts.patrolIdle, 1, "the state aggregate should count the enemy");
   assertEqual(stuckSnapshot.stuckEnemyCount, 1, "the stuck aggregate should count the enemy");
   assertEqual(stuckSnapshot.longestStuckSeconds, 1, "the snapshot should expose the current stuck duration");
@@ -37,10 +40,12 @@ const testFailureSnapshotsAndTransitions = () => {
   assertEqual(stuckSnapshot.affectedEnemies[0]?.position.x, 100, "the affected-enemy list should include its position");
   assertEqual(stuckSnapshot.failureTransitions[0]?.from, "none", "the entry transition should preserve its source state");
   assertEqual(stuckSnapshot.failureTransitions[0]?.to, "insufficientProgress", "the entry transition should preserve its failure");
+  assertEqual(stuckSnapshot.failureTransitions[0]?.toCause, "crowdBlocked", "the transition should preserve its cause");
 
   assertEqual(telemetry.takeSnapshot(1).failureTransitions.length, 0, "failure transitions should be emitted once");
 
   const failureBeforeRecovery = runtime.failure;
+  const failureCauseBeforeRecovery = runtime.failureCause;
   const stuckSinceBeforeRecovery = runtime.stuckSince;
   recordEnemyMovement(runtime, {
     now: 1,
@@ -51,10 +56,17 @@ const testFailureSnapshotsAndTransitions = () => {
     desiredVelocityX: 1,
     desiredVelocityZ: 0,
   });
-  telemetry.recordFailureChange(runtime, failureBeforeRecovery, stuckSinceBeforeRecovery, 1);
+  telemetry.recordFailureChange(
+    runtime,
+    failureBeforeRecovery,
+    failureCauseBeforeRecovery,
+    stuckSinceBeforeRecovery,
+    1,
+  );
 
   const recoveredSnapshot = telemetry.takeSnapshot(1);
   assertEqual(recoveredSnapshot.failureCounts.none, 1, "the recovered enemy should return to the none aggregate");
+  assertEqual(recoveredSnapshot.failureCauseCounts.none, 1, "recovery should clear the failure cause");
   assertEqual(recoveredSnapshot.stuckEnemyCount, 0, "the recovered enemy should leave the affected list");
   assertEqual(recoveredSnapshot.failureTransitions[0]?.to, "none", "the recovery transition should be recorded");
   assertEqual(recoveredSnapshot.failureTransitions[0]?.stuckForSeconds, 1, "the recovery transition should retain total stuck duration");
@@ -113,9 +125,36 @@ const testRecoveryLevelThresholds = () => {
   assertEqual(getEnemyRecoveryLevel(runtime, 20), 0, "a recovered enemy should not retain a recovery level");
 };
 
+const testConfirmedFailureCauseRemainsStable = () => {
+  const runtime = createEnemyAiRuntime(11, "meeting", 100, 100, 0);
+  recordEnemyMovement(runtime, {
+    now: 0.5,
+    x: 100,
+    z: 100,
+    targetX: 300,
+    targetZ: 100,
+    desiredVelocityX: 1,
+    desiredVelocityZ: 0,
+    failureCause: "crowdBlocked",
+  });
+  recordEnemyMovement(runtime, {
+    now: 1,
+    x: 100,
+    z: 100,
+    targetX: 300,
+    targetZ: 100,
+    desiredVelocityX: 1,
+    desiredVelocityZ: 0,
+    failureCause: "unclassified",
+  });
+
+  assertEqual(runtime.failureCause, "crowdBlocked", "a confirmed root cause should not downgrade during one failure");
+};
+
 testFailureSnapshotsAndTransitions();
 testNoDirectionFailure();
 testRecoveryLevelThresholds();
+testConfirmedFailureCauseRemainsStable();
 testStateTransitions();
 
 console.log("enemy AI telemetry tests passed");

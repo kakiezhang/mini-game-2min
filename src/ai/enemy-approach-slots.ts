@@ -33,6 +33,8 @@ export type ApproachSlotAssignmentResult = {
   assignmentChanges: number;
   invalidations: number;
   releases: number;
+  invalidTargetMisses: number;
+  capacityMisses: number;
 };
 
 const createSlots = () => {
@@ -181,6 +183,8 @@ export const assignEnemyApproachSlots = (
     assignmentChanges: 0,
     invalidations: 0,
     releases: 0,
+    invalidTargetMisses: 0,
+    capacityMisses: 0,
   };
   const enemies = Array.from(runtimes);
   const eligible = enemies
@@ -190,14 +194,16 @@ export const assignEnemyApproachSlots = (
   result.eligibleEnemies = eligible.length;
 
   for (const runtime of enemies) {
-    if (isEligible(runtime) || runtime.approachSlotId === undefined) continue;
+    if (isEligible(runtime)) continue;
+    if (runtime.approachSlotId !== undefined) result.releases += 1;
     runtime.approachSlotId = undefined;
-    result.releases += 1;
+    runtime.approachSlotFailure = "none";
   }
 
   for (const runtime of eligible) {
     const previousSlotId = runtime.approachSlotId;
     let assignedTarget: ApproachSlotTarget | undefined;
+    let hasUnoccupiedCandidate = false;
 
     if (previousSlotId !== undefined && !occupiedSlots.has(previousSlotId)) {
       const existingSlot = APPROACH_SLOT_BY_ID.get(previousSlotId);
@@ -210,6 +216,7 @@ export const assignEnemyApproachSlots = (
     if (!assignedTarget) {
       for (const slot of candidateSlots(runtime, playerX, playerZ)) {
         if (occupiedSlots.has(slot.id)) continue;
+        hasUnoccupiedCandidate = true;
         const target = createTarget(runtime, slot, playerX, playerZ, playerRadius);
         if (!isTargetValid(runtime, target, navigation, playerX, playerZ)) continue;
         assignedTarget = target;
@@ -220,11 +227,15 @@ export const assignEnemyApproachSlots = (
     if (!assignedTarget) {
       if (previousSlotId !== undefined) result.invalidations += 1;
       runtime.approachSlotId = undefined;
+      runtime.approachSlotFailure = hasUnoccupiedCandidate ? "invalid" : "capacity";
+      if (hasUnoccupiedCandidate) result.invalidTargetMisses += 1;
+      else result.capacityMisses += 1;
       result.unassignedEnemies += 1;
       continue;
     }
 
     runtime.approachSlotId = assignedTarget.slotId;
+    runtime.approachSlotFailure = "none";
     occupiedSlots.add(assignedTarget.slotId);
     result.assignedEnemies += 1;
     if (assignedTarget.ring === 0) result.firstRingAssignments += 1;

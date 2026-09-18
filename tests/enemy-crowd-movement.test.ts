@@ -218,17 +218,18 @@ const testHardOverlapCorrectionYieldsToRecovery = () => {
   assert(resolution.recoveryPriorityPairs > 0, "recovery-priority pairs should be observable");
 };
 
-const testHardOverlapCorrectionDoesNotFightTwoRecoveringEnemies = () => {
+const testHardOverlapCorrectionGivesTwoRecoveringEnemiesRightOfWay = () => {
   const navigation = new NavigationWorld(400, 400);
   const first = createEnemyAiRuntime(26, "bug", 100, 200, 0);
   const second = createEnemyAiRuntime(27, "bug", 150, 200, 0);
   first.state = "stuckRecovery";
   second.state = "stuckRecovery";
 
-  resolveEnemyOverlaps([first, second], navigation);
+  const resolution = resolveEnemyOverlaps([first, second], navigation);
 
-  assertNear(first.currentX, 100, "two recovering enemies should follow recovery steering instead");
-  assertNear(second.currentX, 150, "hard correction should not fight the second recovery direction");
+  assertNear(first.currentX, 100, "the lower-id recovering enemy should retain right of way");
+  assert(second.currentX > 150, "the yielding recovering enemy should be separated from the pair");
+  assert(resolution.dualRecoveryYieldPairs > 0, "dual-recovery yielding should be observable");
 };
 
 const assertEqual = <T>(actual: T, expected: T, message: string) => {
@@ -248,6 +249,6 @@ testHardOverlapCorrectionCannotPushOutsideMap();
 testHardOverlapCorrectionAllowsShallowContact();
 testHardOverlapCorrectionPreservesForwardProgress();
 testHardOverlapCorrectionYieldsToRecovery();
-testHardOverlapCorrectionDoesNotFightTwoRecoveringEnemies();
+testHardOverlapCorrectionGivesTwoRecoveringEnemiesRightOfWay();
 
 console.log("enemy crowd movement tests passed");

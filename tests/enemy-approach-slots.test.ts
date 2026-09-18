@@ -100,6 +100,26 @@ const testSlotsReleaseOutsideCombat = () => {
 
   assertEqual(runtime.approachSlotId, undefined, "leaving combat should release the approach slot");
   assertEqual(result.releases, 1, "slot releases should be observable");
+  assertEqual(runtime.approachSlotFailure, "none", "leaving combat should clear slot failure state");
+};
+
+const testInvalidTargetsAndCapacityAreDistinguished = () => {
+  const constrainedNavigation = new NavigationWorld(100, 100);
+  const constrained = createChaser(50, 50, 50);
+  const invalid = assignEnemyApproachSlots([constrained], constrainedNavigation, 50, 50, 30);
+
+  assertEqual(constrained.approachSlotId, undefined, "an enemy should remain unassigned when every target is invalid");
+  assertEqual(constrained.approachSlotFailure, "invalid", "invalid geometry should be retained as the slot failure reason");
+  assertEqual(invalid.invalidTargetMisses, 1, "invalid target misses should be observable");
+  assertEqual(invalid.capacityMisses, 0, "invalid geometry is not a capacity miss");
+
+  const openNavigation = new NavigationWorld(1200, 1200);
+  const crowded = Array.from({ length: 19 }, (_, index) => createChaser(60 + index, 600, 600));
+  const capacity = assignEnemyApproachSlots(crowded, openNavigation, 600, 600, 30);
+
+  assertEqual(capacity.assignedEnemies, 18, "all available approach slots should be filled");
+  assertEqual(capacity.capacityMisses, 1, "overflow should be reported separately from invalid geometry");
+  assertEqual(crowded.filter((enemy) => enemy.approachSlotFailure === "capacity").length, 1, "one enemy should retain the capacity reason");
 };
 
 testSlotsRemainStableAndUnique();
@@ -108,5 +128,6 @@ testBlockedSlotsAreRejected();
 testSecondRingProvidesOverflowCapacity();
 testBossCanClaimPrioritySlot();
 testSlotsReleaseOutsideCombat();
+testInvalidTargetsAndCapacityAreDistinguished();
 
 console.log("enemy approach slot tests passed");

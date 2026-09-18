@@ -34,6 +34,18 @@ export type EnemyMovementFailure =
   | "noDirection"
   | "insufficientProgress";
 
+export type EnemyMovementFailureCause =
+  | "none"
+  | "noFlowDirection"
+  | "blockedWaypoint"
+  | "staticCollision"
+  | "crowdBlocked"
+  | "invalidSlot"
+  | "visualOnly"
+  | "unclassified";
+
+export type EnemyApproachSlotFailure = "none" | "invalid" | "capacity";
+
 export type EnemyAiRuntime = {
   id: number;
   kind: EnemyKind;
@@ -54,6 +66,7 @@ export type EnemyAiRuntime = {
   path: NavigationPoint[];
   pathIndex: number;
   approachSlotId?: number;
+  approachSlotFailure: EnemyApproachSlotFailure;
   nextPerceptionAt: number;
   idleUntil: number;
   investigationX: number;
@@ -72,6 +85,7 @@ export type EnemyAiRuntime = {
   lastProgressX: number;
   lastProgressZ: number;
   failure: EnemyMovementFailure;
+  failureCause: EnemyMovementFailureCause;
   recoveryLevel: number;
   separationX: number;
   separationZ: number;
@@ -87,6 +101,7 @@ export type EnemyMovementSample = {
   targetZ: number;
   desiredVelocityX: number;
   desiredVelocityZ: number;
+  failureCause?: EnemyMovementFailureCause;
 };
 
 const STUCK_SAMPLE_INTERVAL = 0.5;
@@ -123,6 +138,7 @@ export const createEnemyAiRuntime = (
   lastHeardAt: Number.NEGATIVE_INFINITY,
   path: [],
   pathIndex: 0,
+  approachSlotFailure: "none",
   nextPerceptionAt: now + (id % 8) * 0.015625,
   idleUntil: now,
   investigationX: x,
@@ -138,6 +154,7 @@ export const createEnemyAiRuntime = (
   lastProgressX: x,
   lastProgressZ: z,
   failure: "none",
+  failureCause: "none",
   recoveryLevel: 0,
   separationX: 0,
   separationZ: 0,
@@ -184,6 +201,7 @@ export const recordEnemyMovement = (runtime: EnemyAiRuntime, sample: EnemyMoveme
   const targetDistance = Math.hypot(sample.targetX - sample.x, sample.targetZ - sample.z);
 
   if (targetDistance > STUCK_MIN_DISPLACEMENT && displacement < STUCK_MIN_DISPLACEMENT) {
+    const wasFailing = runtime.failure !== "none";
     if (wantsToMove) {
       runtime.failure = "insufficientProgress";
       runtime.stuckSince ??= sample.now - STUCK_SAMPLE_INTERVAL;
@@ -191,8 +209,14 @@ export const recordEnemyMovement = (runtime: EnemyAiRuntime, sample: EnemyMoveme
       runtime.failure = "noDirection";
       runtime.stuckSince ??= sample.now - STUCK_SAMPLE_INTERVAL;
     }
+    const detectedCause = sample.failureCause
+      ?? (wantsToMove ? "unclassified" : "noFlowDirection");
+    if (!wasFailing || runtime.failureCause === "none" || runtime.failureCause === "unclassified") {
+      runtime.failureCause = detectedCause;
+    }
   } else {
     runtime.failure = "none";
+    runtime.failureCause = "none";
     runtime.stuckSince = undefined;
   }
 

@@ -79,6 +79,7 @@ export type EnemyOverlapResolution = {
   overlapPairs: number;
   correctionApplications: number;
   recoveryPriorityPairs: number;
+  dualRecoveryYieldPairs: number;
   forwardProgressConstraints: number;
   blockedCorrections: number;
   maximumOverlap: number;
@@ -92,6 +93,7 @@ const createOverlapResolution = (): EnemyOverlapResolution => ({
   overlapPairs: 0,
   correctionApplications: 0,
   recoveryPriorityPairs: 0,
+  dualRecoveryYieldPairs: 0,
   forwardProgressConstraints: 0,
   blockedCorrections: 0,
   maximumOverlap: 0,
@@ -100,10 +102,26 @@ const createOverlapResolution = (): EnemyOverlapResolution => ({
   maximumRemainingOverlap: 0,
 });
 
-const getCorrectionShares = (enemy: EnemyAiRuntime, other: EnemyAiRuntime) => {
+type CorrectionShares = {
+  enemy: number;
+  other: number;
+  recoveryPriority: boolean;
+  yielding?: "enemy" | "other";
+};
+
+const getCorrectionShares = (
+  enemy: EnemyAiRuntime,
+  other: EnemyAiRuntime,
+): CorrectionShares => {
   const enemyRecovering = enemy.state === "stuckRecovery";
   const otherRecovering = other.state === "stuckRecovery";
-  if (enemyRecovering && otherRecovering) return { enemy: 0, other: 0, recoveryPriority: true };
+  if (enemyRecovering && otherRecovering) {
+    const enemyHasPriority = enemy.kind === "boss"
+      || (other.kind !== "boss" && enemy.id < other.id);
+    return enemyHasPriority
+      ? { enemy: 0, other: 1, recoveryPriority: true, yielding: "other" as const }
+      : { enemy: 1, other: 0, recoveryPriority: true, yielding: "enemy" as const };
+  }
   if (enemyRecovering) {
     return { enemy: 0, other: other.kind === "boss" ? 0 : 1, recoveryPriority: true };
   }
@@ -170,10 +188,12 @@ export const resolveEnemyOverlaps = (
 
   const correctionX = new Float64Array(enemies.length);
   const correctionZ = new Float64Array(enemies.length);
+  const yielding = new Uint8Array(enemies.length);
 
   for (let iteration = 0; iteration < ENEMY_OVERLAP_ITERATIONS; iteration += 1) {
     correctionX.fill(0);
     correctionZ.fill(0);
+    yielding.fill(0);
     let foundOverlap = false;
 
     for (let index = 0; index < enemies.length; index += 1) {
@@ -196,6 +216,13 @@ export const resolveEnemyOverlaps = (
           : stablePairDirection(enemy.id, other.id);
         const shares = getCorrectionShares(enemy, other);
         if (shares.recoveryPriority) result.recoveryPriorityPairs += 1;
+        if (shares.yielding === "enemy") {
+          yielding[index] = 1;
+          result.dualRecoveryYieldPairs += 1;
+        } else if (shares.yielding === "other") {
+          yielding[otherIndex] = 1;
+          result.dualRecoveryYieldPairs += 1;
+        }
         correctionX[index] += direction.x * overlap * shares.enemy;
         correctionZ[index] += direction.z * overlap * shares.enemy;
         correctionX[otherIndex] -= direction.x * overlap * shares.other;
@@ -207,11 +234,9 @@ export const resolveEnemyOverlaps = (
     let movedThisIteration = false;
     for (let index = 0; index < enemies.length; index += 1) {
       const enemy = enemies[index];
-      const progressSafe = preserveForwardProgress(
-        enemy,
-        correctionX[index],
-        correctionZ[index],
-      );
+      const progressSafe = yielding[index]
+        ? { x: correctionX[index], z: correctionZ[index], constrained: false }
+        : preserveForwardProgress(enemy, correctionX[index], correctionZ[index]);
       if (progressSafe.constrained) result.forwardProgressConstraints += 1;
       const correction = limitCorrection(progressSafe.x, progressSafe.z);
       if (correction.length < 0.0001) continue;
