@@ -1,4 +1,8 @@
-import { recomputeEnemySeparation } from "../src/ai/enemy-crowd-movement.js";
+import {
+  ENEMY_OVERLAP_ITERATIONS,
+  recomputeEnemySeparation,
+  resolveEnemyOverlaps,
+} from "../src/ai/enemy-crowd-movement.js";
 import { getEnemyMovementDirection } from "../src/ai/enemy-movement-recovery.js";
 import { createEnemyAiRuntime } from "../src/ai/enemy-ai-runtime.js";
 import { NavigationWorld } from "../src/navigation.js";
@@ -106,10 +110,144 @@ const testSeparationCannotReversePathProgress = () => {
   assert(direction.x > 0.4, "even a large opposing separation force should retain forward progress");
 };
 
+const testHardOverlapCorrectionSeparatesRegularEnemies = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const first = createEnemyAiRuntime(10, "bug", 100, 200, 0);
+  const second = createEnemyAiRuntime(11, "bug", 150, 200, 0);
+
+  const resolution = resolveEnemyOverlaps([first, second], navigation);
+
+  assertEqual(ENEMY_OVERLAP_ITERATIONS, 2, "hard correction should remain bounded to two iterations");
+  assert(resolution.overlapPairs > 0, "an overlapping pair should be corrected");
+  assert(first.currentX < 100, "the first regular enemy should move away from the pair center");
+  assert(second.currentX > 150, "the second regular enemy should move away from the pair center");
+  assertNear(100 - first.currentX, second.currentX - 150, "regular enemies should share correction equally");
+  assertEqual(resolution.remainingOverlapPairs, 0, "a modest overlap should be fully resolved in one frame");
+};
+
+const testHardOverlapCorrectionUsesStableDirection = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const first = createEnemyAiRuntime(12, "changeRequest", 200, 200, 0);
+  const second = createEnemyAiRuntime(13, "changeRequest", 200, 200, 0);
+  const reversedFirst = createEnemyAiRuntime(12, "changeRequest", 200, 200, 0);
+  const reversedSecond = createEnemyAiRuntime(13, "changeRequest", 200, 200, 0);
+
+  resolveEnemyOverlaps([first, second], navigation);
+  resolveEnemyOverlaps([reversedSecond, reversedFirst], navigation);
+
+  assertNear(first.currentX, reversedFirst.currentX, "hard overlap direction should ignore iteration order");
+  assertNear(first.currentZ, reversedFirst.currentZ, "hard overlap direction should be stable on Z");
+  assertNear(second.currentX, reversedSecond.currentX, "the paired correction should remain deterministic");
+  assertNear(second.currentZ, reversedSecond.currentZ, "the paired Z correction should remain deterministic");
+};
+
+const testHardOverlapCorrectionPreservesBossPriority = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const regular = createEnemyAiRuntime(14, "changeRequest", 180, 200, 0);
+  const boss = createEnemyAiRuntime(15, "boss", 200, 200, 0);
+
+  resolveEnemyOverlaps([regular, boss], navigation);
+
+  assert(regular.currentX < 180, "the regular enemy should yield to the boss");
+  assertNear(boss.currentX, 200, "the boss should keep its X position");
+  assertNear(boss.currentZ, 200, "the boss should keep its Z position");
+};
+
+const testHardOverlapCorrectionRespectsStaticCollision = () => {
+  const navigation = new NavigationWorld(400, 400);
+  navigation.addObstacle(200, 200, 40, 200);
+  const first = createEnemyAiRuntime(16, "bug", 136, 200, 0);
+  const second = createEnemyAiRuntime(17, "bug", 120, 200, 0);
+
+  resolveEnemyOverlaps([first, second], navigation);
+
+  assert(navigation.canOccupy(first.currentX, first.currentZ, 36), "hard correction must not enter an obstacle");
+  assert(navigation.canOccupy(second.currentX, second.currentZ, 36), "the paired enemy must stay collision-safe");
+  assert(first.currentX <= 144.000001, "the wall-facing enemy should remain outside the wall");
+};
+
+const testHardOverlapCorrectionCannotPushOutsideMap = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const first = createEnemyAiRuntime(18, "bug", 36, 100, 0);
+  const second = createEnemyAiRuntime(19, "bug", 36, 100, 0);
+
+  resolveEnemyOverlaps([first, second], navigation);
+
+  assert(first.currentX >= 36, "hard correction must keep the first enemy inside the map");
+  assert(second.currentX >= 36, "hard correction must keep the second enemy inside the map");
+  assert(navigation.canOccupy(first.currentX, first.currentZ, 36), "the first corrected position should be occupiable");
+  assert(navigation.canOccupy(second.currentX, second.currentZ, 36), "the second corrected position should be occupiable");
+};
+
+const testHardOverlapCorrectionAllowsShallowContact = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const first = createEnemyAiRuntime(20, "bug", 100, 200, 0);
+  const second = createEnemyAiRuntime(21, "bug", 170, 200, 0);
+
+  const resolution = resolveEnemyOverlaps([first, second], navigation);
+
+  assertEqual(resolution.overlapPairs, 0, "shallow contact should not trigger hard correction");
+  assertNear(first.currentX, 100, "shallow contact should not move the first enemy");
+  assertNear(second.currentX, 170, "shallow contact should not move the second enemy");
+};
+
+const testHardOverlapCorrectionPreservesForwardProgress = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const trailing = createEnemyAiRuntime(22, "bug", 100, 200, 0);
+  const leading = createEnemyAiRuntime(23, "bug", 150, 200, 0);
+  trailing.desiredVelocityX = 1;
+  leading.desiredVelocityX = 1;
+
+  const resolution = resolveEnemyOverlaps([trailing, leading], navigation);
+
+  assertNear(trailing.currentX, 100, "hard correction must not push a moving enemy backward");
+  assert(leading.currentX > 150, "the leading enemy may move forward to create room");
+  assert(resolution.forwardProgressConstraints > 0, "forward-progress filtering should be observable");
+};
+
+const testHardOverlapCorrectionYieldsToRecovery = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const recovering = createEnemyAiRuntime(24, "bug", 100, 200, 0);
+  const other = createEnemyAiRuntime(25, "bug", 150, 200, 0);
+  recovering.state = "stuckRecovery";
+
+  const resolution = resolveEnemyOverlaps([recovering, other], navigation);
+
+  assertNear(recovering.currentX, 100, "hard correction must not displace a recovering enemy");
+  assert(other.currentX > 150, "a regular enemy should yield to a recovering enemy");
+  assert(resolution.recoveryPriorityPairs > 0, "recovery-priority pairs should be observable");
+};
+
+const testHardOverlapCorrectionDoesNotFightTwoRecoveringEnemies = () => {
+  const navigation = new NavigationWorld(400, 400);
+  const first = createEnemyAiRuntime(26, "bug", 100, 200, 0);
+  const second = createEnemyAiRuntime(27, "bug", 150, 200, 0);
+  first.state = "stuckRecovery";
+  second.state = "stuckRecovery";
+
+  resolveEnemyOverlaps([first, second], navigation);
+
+  assertNear(first.currentX, 100, "two recovering enemies should follow recovery steering instead");
+  assertNear(second.currentX, 150, "hard correction should not fight the second recovery direction");
+};
+
+const assertEqual = <T>(actual: T, expected: T, message: string) => {
+  if (actual !== expected) throw new Error(`${message}: expected ${String(expected)}, received ${String(actual)}`);
+};
+
 testOverlappingEnemiesReceiveStableOppositeDirections();
 testBossKeepsPriority();
 testSeparationCannotPushOutsideMap();
 testSeparationCannotPushIntoObstacle();
 testSeparationCannotReversePathProgress();
+testHardOverlapCorrectionSeparatesRegularEnemies();
+testHardOverlapCorrectionUsesStableDirection();
+testHardOverlapCorrectionPreservesBossPriority();
+testHardOverlapCorrectionRespectsStaticCollision();
+testHardOverlapCorrectionCannotPushOutsideMap();
+testHardOverlapCorrectionAllowsShallowContact();
+testHardOverlapCorrectionPreservesForwardProgress();
+testHardOverlapCorrectionYieldsToRecovery();
+testHardOverlapCorrectionDoesNotFightTwoRecoveringEnemies();
 
 console.log("enemy crowd movement tests passed");

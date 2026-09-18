@@ -1256,7 +1256,6 @@ class OfficeEscapeGame {
       if (movementLength > 0.08) enemy.group.rotation.y = Math.atan2(moveX, moveZ);
       enemy.visual.setMovement(moveX * behavior.speedMultiplier, moveZ * behavior.speedMultiplier);
       enemy.visual.update(delta);
-      this.updateEnemyVisualState(enemy);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);
       if (
@@ -1275,6 +1274,13 @@ class OfficeEscapeGame {
           this.showFloating("减速", "#ddd6fe");
         }
       }
+    }
+
+    this.enemyAi.resolveCrowdOverlaps(this.navigation);
+    for (const enemy of this.enemies) {
+      enemy.group.position.x = enemy.ai.currentX;
+      enemy.group.position.z = enemy.ai.currentZ;
+      this.updateEnemyVisualState(enemy);
     }
   }
 

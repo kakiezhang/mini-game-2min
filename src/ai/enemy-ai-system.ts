@@ -13,6 +13,7 @@ import { EnemyAiDebugLayer } from "./enemy-ai-debug";
 import {
   ENEMY_SEPARATION_INTERVAL,
   recomputeEnemySeparation,
+  resolveEnemyOverlaps,
 } from "./enemy-crowd-movement.js";
 import { EnemyAiTelemetry } from "./enemy-ai-telemetry";
 import {
@@ -73,6 +74,18 @@ export class EnemyAiSystem {
   private readonly runtimes = new Map<number, EnemyAiRuntime>();
   private latestNoise?: EnemyNoiseEvent;
   private separationTimer = 0;
+  private crowdMetrics = {
+    pairChecks: 0,
+    overlapPairs: 0,
+    correctionApplications: 0,
+    recoveryPriorityPairs: 0,
+    forwardProgressConstraints: 0,
+    blockedCorrections: 0,
+    maximumOverlap: 0,
+    maximumCorrection: 0,
+    maximumRemainingOverlapPairs: 0,
+    maximumRemainingOverlap: 0,
+  };
 
   constructor(scene: THREE.Scene, search = window.location.search) {
     this.options = readEnemyAiDevelopmentOptions(search);
@@ -172,6 +185,32 @@ export class EnemyAiSystem {
     this.separationTimer = ENEMY_SEPARATION_INTERVAL;
   }
 
+  resolveCrowdOverlaps(navigation: NavigationWorld) {
+    const resolution = resolveEnemyOverlaps(this.runtimes.values(), navigation);
+    this.crowdMetrics.pairChecks += resolution.pairChecks;
+    this.crowdMetrics.overlapPairs += resolution.overlapPairs;
+    this.crowdMetrics.correctionApplications += resolution.correctionApplications;
+    this.crowdMetrics.recoveryPriorityPairs += resolution.recoveryPriorityPairs;
+    this.crowdMetrics.forwardProgressConstraints += resolution.forwardProgressConstraints;
+    this.crowdMetrics.blockedCorrections += resolution.blockedCorrections;
+    this.crowdMetrics.maximumOverlap = Math.max(
+      this.crowdMetrics.maximumOverlap,
+      resolution.maximumOverlap,
+    );
+    this.crowdMetrics.maximumCorrection = Math.max(
+      this.crowdMetrics.maximumCorrection,
+      resolution.maximumCorrection,
+    );
+    this.crowdMetrics.maximumRemainingOverlapPairs = Math.max(
+      this.crowdMetrics.maximumRemainingOverlapPairs,
+      resolution.remainingOverlapPairs,
+    );
+    this.crowdMetrics.maximumRemainingOverlap = Math.max(
+      this.crowdMetrics.maximumRemainingOverlap,
+      resolution.maximumRemainingOverlap,
+    );
+  }
+
   recordMovement(runtime: EnemyAiRuntime, sample: EnemyMovementSample, height: number) {
     const previousFailure = runtime.failure;
     const previousStuckSince = runtime.stuckSince;
@@ -181,7 +220,11 @@ export class EnemyAiSystem {
   }
 
   takePerformanceSnapshot(now: number) {
-    return this.telemetry.takeSnapshot(now);
+    const crowd = { ...this.crowdMetrics };
+    for (const key of Object.keys(this.crowdMetrics) as Array<keyof typeof this.crowdMetrics>) {
+      this.crowdMetrics[key] = 0;
+    }
+    return { ...this.telemetry.takeSnapshot(now), crowd };
   }
 
   remove(runtime: EnemyAiRuntime, now: number) {
