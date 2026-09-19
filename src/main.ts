@@ -6,6 +6,7 @@ import {
   CharacterAssetStore,
   StaticCharacterVisual,
   type CharacterVisual,
+  turnCharacterTowardMovement,
 } from "./characters/animated-character";
 import { CHARACTER_MODELS } from "./characters/catalog";
 import { traceCircleTargets, type AttackRequest } from "./combat";
@@ -1259,7 +1260,7 @@ class OfficeEscapeGame {
         desiredVelocityX: moveX * behavior.speedMultiplier,
         desiredVelocityZ: moveZ * behavior.speedMultiplier,
       }, ENEMY_CONFIG[enemy.kind].height);
-      if (movementLength > 0.08) enemy.group.rotation.y = Math.atan2(moveX, moveZ);
+      turnCharacterTowardMovement(enemy.group, moveX, moveZ, delta);
       enemy.visual.setMovement(moveX * behavior.speedMultiplier, moveZ * behavior.speedMultiplier);
       enemy.visual.update(delta);
 

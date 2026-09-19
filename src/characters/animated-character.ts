@@ -26,6 +26,26 @@ export interface CharacterVisual {
   dispose(): void;
 }
 
+const DEFAULT_TURN_SPEED = Math.PI * 3;
+
+export function turnCharacterTowardMovement(
+  root: THREE.Object3D,
+  directionX: number,
+  directionZ: number,
+  delta: number,
+  turnSpeed = DEFAULT_TURN_SPEED,
+) {
+  if (Math.hypot(directionX, directionZ) <= 0.08) return;
+
+  const targetRotation = Math.atan2(directionX, directionZ);
+  const rotationDelta = Math.atan2(
+    Math.sin(targetRotation - root.rotation.y),
+    Math.cos(targetRotation - root.rotation.y),
+  );
+  const maximumStep = Math.max(0, delta) * turnSpeed;
+  root.rotation.y += THREE.MathUtils.clamp(rotationDelta, -maximumStep, maximumStep);
+}
+
 export class StaticCharacterVisual implements CharacterVisual {
   constructor(readonly root = new THREE.Group()) {}
 
