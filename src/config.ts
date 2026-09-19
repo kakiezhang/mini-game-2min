@@ -71,7 +71,7 @@ export const ENEMY_CONFIG: Record<EnemyKind, EnemyConfig> = {
   changeRequest: {
     color: COLORS.changeRequest,
     radius: 17,
-    height: 46,
+    height: 104,
     hp: 45,
     speed: 53,
     damage: 8,

@@ -1,73 +1,27 @@
-Generate this enemy as 8 separate row images instead of one full 8-row sheet.
+# 需求变更怪四视图提示词
 
-Use each prompt below separately. Choose a 1:1 square image size. Save the 8 outputs with these filenames:
+生成一张用于混元 3D 建模和 Mixamo 绑骨的游戏角色四视图。角色是“需求变更怪”：一名看起来客气、实际不断追加需求的女性产品经理型怪物。
 
-1. row0_down.png
-2. row1_down_right.png
-3. row2_right.png
-4. row3_up_right.png
-5. row4_up.png
-6. row5_up_left.png
-7. row6_left.png
-8. row7_down_left.png
+角色面相：圆脸，黑色圆框眼镜，半眯眼，略微抬起的眉毛，嘴角带克制而意味深长的假笑，呈现“我只改一点点”的精明、难缠和压迫感。不要正气、热血或英雄式表情，不要恐怖、血腥或夸张獠牙。黑色中分头发，在后脑扎低马尾。
 
-After generation, put all 8 files in:
+角色比例必须与现有主角、PPT怪和Bug怪保持同一套Q版游戏风格：约3.8至4.2头身，大头、短颈、紧凑躯干；腿部长度不超过全身高度的42%；手臂和小腿短而粗，手掌略大，鞋子宽大厚实。禁止写实成人的长腿、窄肩、小头或七八头身比例。四个视角中的头部大小、肩宽、躯干长度、腿长和鞋子大小必须完全一致。
 
-src/assets/raw/enemy_change_request_rows/
+服装与配件：钴蓝色办公室工装夹克，内穿浅色衬衫，深藏青色宽松卷边长裤，白蓝配色的厚底运动鞋，胸前工牌；背部固定一个方正、塞满PRD资料和多层彩色标签的需求文档背包，腰间固定一个外带咖啡杯。使用橙蓝双色循环修改箭头作为图形符号，但不得出现任何可读文字。双手必须空着，所有配件位置在四个视角中保持一致。
 
-Shared character design for all 8 prompts:
-A persistent product manager change-request worker, a human-like office stress monster. She is a short-haired female product manager wearing a neat blue shirt uniform, dark office skirt or pants, and an office ID badge labeled "CHANGE". She holds a PRD document in her left hand and a Manner coffee cup in her right hand. The PRD document should look like a thick product requirement document with many sticky notes and revision marks. She should feel pushy, demanding, energetic, and slightly annoying, like she is constantly asking for one more small change, but not scary or bloody.
+整体风格：精致的3D手游Q版角色设定图，玩具感比例，圆润造型，轮廓清晰，材质干净，细节密度与现有角色一致；不是动物，不是奇幻生物，不是2D像素画，不要明显低多边形切面。
 
-Important:
-This is not an animal and not a fantasy creature. It is a stylized human office worker enemy representing product change requests and scope creep.
+画面必须是1376×768横向画布，只出现四个完整全身角色，等距排列且尺寸相同。从左到右严格依次为：正面、左前45度、右前45度、背面。四个视角必须是完全相同的角色、服装、颜色、比例、发型、背包、咖啡杯和配件。
 
-Style:
-Polished hand-painted mobile game sprite, smooth rounded shapes, clean readable silhouette, exaggerated cartoon office character, high-quality 2.5D game asset. No pixel art, no voxel style, no low-poly facets, no realistic horror, no gore.
+姿势采用放松且对称、适合自动绑骨的A-Pose：双臂略微离开躯干，肘部自然伸直，手掌与手指清晰分离；双腿略微分开，膝盖和脚踝轮廓清楚；全身处于同一基线，双手和双脚完整可见。人物之间不能重叠，不能裁切任何身体部位。
 
-Shared canvas rules:
-One single horizontal sprite strip on a solid pure green chroma key background (#00ff00). The green background must be flat, uniform, exactly #00ff00, with no gradient, no texture, no glow, and no shadow blending into the background.
+背景为均匀的浅灰色摄影棚背景，柔和、均匀、中性的棚拍光照。不要场景、地面杂物、交叉阴影、文字、标签、数字、网格线、边框、水印、武器、手持物、额外人物、额外肢体、动态动作、侧面90度视图或夸张透视。
 
-Shared layout rules:
-Exactly 1 row and exactly 5 columns. Each column must contain exactly one full-body character, centered in its cell, same scale in every cell, no cropping. Do not create multiple rows. Do not create fewer than 5 characters. Do not create more than 5 characters. Do not add grid lines, labels, numbers, UI, text, borders, or separators.
+## 已生成文件
 
-Shared animation columns, from left to right:
-1. idle standing pose
-2. walk frame 1
-3. walk frame 2
-4. walk frame 3
-5. walk frame 4
+- `change_request_four_only_45mod_v3.png`
+- `change_request_v3_front.png`
+- `change_request_v3_left_front.png`
+- `change_request_v3_right_front.png`
+- `change_request_v3_back.png`
 
-Shared animation requirements:
-- Walk frames must show confident fast office steps.
-- The PRD document in the left hand and the coffee cup in the right hand should move subtly but remain readable.
-- The character should stay centered and keep the same size in every frame.
-- Keep the feet on the same baseline across all 5 frames.
-- Do not add motion blur.
-- Do not add shadows that cross cell boundaries.
-
-Shared camera/view:
-Orthographic 3/4 top-down game view, matching an isometric-like office action game. The enemy should feel grounded on a tilted top-down office map.
-
-Prompt 1 - row0_down.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen down, 180 degrees, walking toward the camera. Front of body visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 2 - row1_down_right.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen down-right, 135 degrees, walking diagonally toward camera-right. Front-right three-quarter view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 3 - row2_right.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen right, 90 degrees, walking to the right side of the screen. Right side profile view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 4 - row3_up_right.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen up-right, 45 degrees, walking diagonally away to camera-right. Back-right three-quarter view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 5 - row4_up.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen up, 0 degrees, walking away from the camera. Back view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 6 - row5_up_left.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen up-left, 315 degrees, walking diagonally away to camera-left. Back-left three-quarter view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 7 - row6_left.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen left, 270 degrees, walking to the left side of the screen. Left side profile view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
-
-Prompt 8 - row7_down_left.png:
-Create a 2D sprite strip for the shared character design above. Exactly 1 row and 5 columns. All 5 frames face screen down-left, 225 degrees, walking diagonally toward camera-left. Front-left three-quarter view visible. Use the shared canvas rules, layout rules, animation columns, animation requirements, style, and camera/view.
+以上PNG以及建模、绑骨中间产物均作为本地流水线文件，不纳入Git；正式运行时仅提交优化后的 `change_request_walk_1k_meshopt.glb`。

@@ -8,7 +8,7 @@ import {
   type CharacterVisual,
   turnCharacterTowardMovement,
 } from "./characters/animated-character";
-import { CHARACTER_MODELS } from "./characters/catalog";
+import { CHARACTER_MODELS, ENEMY_CHARACTER_MODELS } from "./characters/catalog";
 import { traceCircleTargets, type AttackRequest } from "./combat";
 import {
   AMMO_CONFIG,
@@ -211,6 +211,7 @@ class OfficeEscapeGame {
       this.createPlayer(),
       this.characterAssets.preload(CHARACTER_MODELS.bug),
       this.characterAssets.preload(CHARACTER_MODELS.ppt),
+      this.characterAssets.preload(CHARACTER_MODELS.changeRequest),
     ]);
     this.createFixedAmmoSupplies();
     this.createCrosshair();
@@ -927,7 +928,7 @@ class OfficeEscapeGame {
         gameState: this.gameState,
         enemyCount: this.enemies.length,
         animatedEnemyCount: this.enemies.reduce((count, enemy) => (
-          count + (enemy.kind === "bug" || enemy.kind === "meeting" ? 1 : 0)
+          count + (ENEMY_CHARACTER_MODELS[enemy.kind] ? 1 : 0)
         ), 0),
         rendererInfo: this.renderer.info,
       });
@@ -1079,11 +1080,7 @@ class OfficeEscapeGame {
     const healthBarWidth = kind === "boss" ? 86 : 48;
     const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
     const healthFill = healthBar.children[1] as THREE.Mesh;
-    const animatedModel = kind === "bug"
-      ? CHARACTER_MODELS.bug
-      : kind === "meeting"
-        ? CHARACTER_MODELS.ppt
-        : undefined;
+    const animatedModel = ENEMY_CHARACTER_MODELS[kind];
     const visual = animatedModel
       ? this.characterAssets.create(animatedModel, {
         maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
@@ -1092,8 +1089,6 @@ class OfficeEscapeGame {
 
     if (kind === "boss") {
       this.addBossModel(visual.root, config);
-    } else if (kind === "changeRequest") {
-      this.addChangeRequestModel(visual.root, config);
     }
     group.add(visual.root);
 
@@ -1122,34 +1117,6 @@ class OfficeEscapeGame {
       visual,
     });
     this.nextEnemyId += 1;
-  }
-
-  private addChangeRequestModel(group: THREE.Group, config: EnemyConfig) {
-    const hide = this.characterInstanceMaterial("horseHide");
-    const body = this.meshWithMaterial(new THREE.CapsuleGeometry(14, config.height - 18, 6, 16), hide);
-    body.scale.z = 0.82;
-    body.position.y = config.height / 2;
-    const head = this.meshWithMaterial(new THREE.SphereGeometry(1, 18, 12), hide);
-    head.scale.set(10, 13, 8.5);
-    head.position.set(0, config.height + 13, 7);
-    const muzzle = this.mesh(new THREE.SphereGeometry(1, 14, 10), 0xbfd9ff);
-    muzzle.scale.set(8, 4.5, 7);
-    muzzle.position.set(0, config.height + 8, 21);
-    const mane = this.mesh(new THREE.BoxGeometry(7, 32, 8), 0x10243a);
-    mane.position.set(0, config.height + 10, -4);
-    const leftEar = this.mesh(new THREE.ConeGeometry(4, 15, 10), 0x9bc8ff);
-    leftEar.position.set(-8, config.height + 30, 1);
-    leftEar.rotation.z = 0.28;
-    const rightEar = leftEar.clone();
-    rightEar.position.x = 8;
-    rightEar.rotation.z = -0.28;
-    const visor = this.mesh(new THREE.BoxGeometry(25, 7, 5), 0xdbeafe);
-    visor.position.set(0, config.height + 16, 16);
-    const shoulderLeft = this.mesh(new THREE.BoxGeometry(9, 18, 18), 0x1e3a8a);
-    shoulderLeft.position.set(-22, 35, 0);
-    const shoulderRight = shoulderLeft.clone();
-    shoulderRight.position.x = 22;
-    group.add(body, head, muzzle, mane, leftEar, rightEar, visor, shoulderLeft, shoulderRight);
   }
 
   private addBossModel(group: THREE.Group, config: EnemyConfig) {
