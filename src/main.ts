@@ -34,6 +34,7 @@ import { NavigationWorld, type Obstacle } from "./navigation";
 import { GamePerformanceMonitor } from "./performance/game-performance-monitor";
 import { createDynamicPointLight } from "./performance/render-performance-profile";
 import { WeaponSystem } from "./weapon";
+import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 
 type Enemy = {
   id: number;
@@ -130,6 +131,7 @@ class OfficeEscapeGame {
   private readonly particleGeometry = new THREE.SphereGeometry(1, 6, 4);
   private readonly characterAssets = new CharacterAssetStore();
   private readonly enemyAi = new EnemyAiSystem(this.scene);
+  private readonly enemySpawnEffects = new EnemySpawnEffectSystem(this.scene);
   private readonly performanceMonitor = new GamePerformanceMonitor(
     this.navigation,
     this.scene,
@@ -950,6 +952,7 @@ class OfficeEscapeGame {
     }
 
     this.elapsed += delta;
+    this.enemySpawnEffects.update(delta);
     this.spawnTimer -= delta;
     this.lastHintTimer -= delta;
 
@@ -1100,10 +1103,10 @@ class OfficeEscapeGame {
     this.scene.add(group);
     this.scene.add(healthBar);
 
-    this.enemies.push({
+    const enemy: Enemy = {
       id,
       kind,
-      ai: this.enemyAi.createRuntime(id, kind, x, z, this.elapsed),
+      ai: this.enemyAi.createRuntime(id, kind, x, z, this.elapsed, true),
       group,
       healthBar,
       healthFill,
@@ -1118,6 +1121,19 @@ class OfficeEscapeGame {
       hitFlashUntil: 0,
       hitFlashActive: false,
       visual,
+    };
+    this.enemies.push(enemy);
+    this.enemySpawnEffects.begin({
+      id,
+      x,
+      z,
+      radius: config.radius,
+      height: config.height,
+      color: config.color,
+      target: group,
+      healthBar,
+      boss: kind === "boss",
+      onComplete: () => this.enemyAi.activateSpawn(enemy.ai, this.elapsed),
     });
     this.nextEnemyId += 1;
   }
@@ -1186,6 +1202,7 @@ class OfficeEscapeGame {
     );
 
     for (const enemy of this.enemies) {
+      if (enemy.ai.state === "spawning") continue;
       const behavior = this.enemyAi.updateBehavior(enemy.ai, this.navigation, {
         now: this.elapsed,
         x: enemy.group.position.x,
@@ -1255,6 +1272,7 @@ class OfficeEscapeGame {
 
     this.enemyAi.resolveCrowdOverlaps(this.navigation);
     for (const enemy of this.enemies) {
+      if (enemy.ai.state === "spawning") continue;
       enemy.group.position.x = enemy.ai.currentX;
       enemy.group.position.z = enemy.ai.currentZ;
       this.updateEnemyVisualState(enemy);
@@ -1429,7 +1447,7 @@ class OfficeEscapeGame {
       request.directionZ,
       request.range,
       obstacleDistance,
-      this.enemies.filter((enemy) => enemy.hp > 0).map((enemy) => ({
+      this.enemies.filter((enemy) => enemy.hp > 0 && enemy.ai.state !== "spawning").map((enemy) => ({
         target: enemy,
         x: enemy.group.position.x,
         z: enemy.group.position.z,

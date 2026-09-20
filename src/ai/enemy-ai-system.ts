@@ -153,8 +153,9 @@ export class EnemyAiSystem {
     return pickAvailableSpawnKind(weights, activeEnemies, () => this.random());
   }
 
-  createRuntime(id: number, kind: EnemyKind, x: number, z: number, now: number) {
+  createRuntime(id: number, kind: EnemyKind, x: number, z: number, now: number, spawning = false) {
     const runtime = createEnemyAiRuntime(id, kind, x, z, now);
+    if (spawning) runtime.state = "spawning";
     runtime.idleUntil = now + this.randomRange(
       ENEMY_AI_TIMING.patrolIdleMin,
       ENEMY_AI_TIMING.patrolIdleMax,
@@ -164,6 +165,21 @@ export class EnemyAiSystem {
     this.runtimes.set(runtime.id, runtime);
     this.telemetry.register(runtime);
     return runtime;
+  }
+
+  activateSpawn(runtime: EnemyAiRuntime, now: number) {
+    if (runtime.state !== "spawning") return;
+    const previousState = runtime.state;
+    setEnemyAiState(runtime, runtime.kind === "boss" ? "chase" : "patrolIdle", now);
+    runtime.idleUntil = now + (runtime.kind === "boss" ? 0 : this.randomRange(
+      ENEMY_AI_TIMING.patrolIdleMin,
+      ENEMY_AI_TIMING.patrolIdleMax,
+    ));
+    runtime.nextPerceptionAt = now;
+    runtime.lastProgressAt = now;
+    runtime.lastProgressX = runtime.currentX;
+    runtime.lastProgressZ = runtime.currentZ;
+    this.telemetry.recordStateChange(runtime, previousState, now);
   }
 
   updateBehavior(
@@ -214,7 +230,7 @@ export class EnemyAiSystem {
       navigation,
       sample,
       direction,
-      this.runtimes.values(),
+      this.getActiveRuntimes(),
     );
     this.movementFailureEvidence.record(
       runtime.id,
@@ -231,10 +247,11 @@ export class EnemyAiSystem {
     playerZ: number,
     playerRadius: number,
   ) {
+    const activeRuntimes = this.getActiveRuntimes();
     this.approachSlotTimer -= delta;
     if (this.approachSlotTimer <= 0) {
       const assignments = assignEnemyApproachSlots(
-        this.runtimes.values(),
+        activeRuntimes,
         navigation,
         playerX,
         playerZ,
@@ -258,12 +275,12 @@ export class EnemyAiSystem {
 
     this.separationTimer -= delta;
     if (this.separationTimer > 0) return;
-    recomputeEnemySeparation(this.runtimes.values());
+    recomputeEnemySeparation(activeRuntimes);
     this.separationTimer = ENEMY_SEPARATION_INTERVAL;
   }
 
   resolveCrowdOverlaps(navigation: NavigationWorld) {
-    const resolution = resolveEnemyOverlaps(this.runtimes.values(), navigation);
+    const resolution = resolveEnemyOverlaps(this.getActiveRuntimes(), navigation);
     this.crowdMetrics.pairChecks += resolution.pairChecks;
     this.crowdMetrics.overlapPairs += resolution.overlapPairs;
     this.crowdMetrics.correctionApplications += resolution.correctionApplications;
@@ -352,7 +369,7 @@ export class EnemyAiSystem {
     if (isCrowdRecovery) {
       const blocker = findEnemyMovementBlocker(
         runtime,
-        this.runtimes.values(),
+        this.getActiveRuntimes(),
         sample,
         direction,
       );
@@ -379,7 +396,7 @@ export class EnemyAiSystem {
   }
 
   private alertAllies(source: EnemyAiRuntime, x: number, z: number, now: number) {
-    for (const runtime of this.runtimes.values()) {
+    for (const runtime of this.getActiveRuntimes()) {
       if (runtime === source || runtime.kind === "boss") continue;
       if (Math.hypot(runtime.currentX - source.currentX, runtime.currentZ - source.currentZ) > ENEMY_AI_TIMING.allyAlertRadius) {
         continue;
@@ -388,5 +405,11 @@ export class EnemyAiSystem {
       alertEnemyFromAlly(runtime, x, z, now);
       this.telemetry.recordStateChange(runtime, previousState, now);
     }
+  }
+
+  private getActiveRuntimes() {
+    return Array.from(this.runtimes.values()).filter((runtime) => (
+      runtime.state !== "spawning" && runtime.state !== "dead"
+    ));
   }
 }
