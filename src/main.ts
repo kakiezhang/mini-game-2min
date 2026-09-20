@@ -36,6 +36,7 @@ import { createDynamicPointLight } from "./performance/render-performance-profil
 import { GameMinimap } from "./ui/game-minimap";
 import { WeaponSystem } from "./weapon";
 import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
+import { ELEVATOR_FRAME_LAYOUT, type ElevatorBoxLayout } from "./elevator-layout";
 
 type Enemy = {
   id: number;
@@ -353,15 +354,16 @@ class OfficeEscapeGame {
   }
 
   private addElevatorDoor() {
-    this.addWall(398, 1295, 36, 28);
-    this.addWall(682, 1295, 36, 28);
-    this.addWall(380, 1425, 24, 260);
-    this.addWall(700, 1425, 24, 260);
-    this.addWall(540, 1555, 344, 24);
+    this.addWallFromLayout(ELEVATOR_FRAME_LAYOUT.leftJamb);
+    this.addWallFromLayout(ELEVATOR_FRAME_LAYOUT.rightJamb);
+    this.addWallFromLayout(ELEVATOR_FRAME_LAYOUT.leftSideWall);
+    this.addWallFromLayout(ELEVATOR_FRAME_LAYOUT.rightSideWall);
+    this.addWallFromLayout(ELEVATOR_FRAME_LAYOUT.backWall);
 
     const elevatorMetal = this.surfaceMaterial("elevator-metal", COLORS.elevatorClosed, 0xaeb7c0, 1, "metal", 2, 1);
-    const lintel = this.texturedBox(320, 24, 28, elevatorMetal);
-    lintel.position.set(540, 80, 1295);
+    const lintelLayout = ELEVATOR_FRAME_LAYOUT.lintel;
+    const lintel = this.texturedBox(lintelLayout.width, lintelLayout.height, lintelLayout.depth, elevatorMetal);
+    lintel.position.set(lintelLayout.x, lintelLayout.y, lintelLayout.z);
     this.scene.add(lintel);
 
     const leftDoor = this.texturedBox(124, 68, 18, elevatorMetal);
@@ -376,6 +378,10 @@ class OfficeEscapeGame {
     this.elevatorZone.position.set(540, 3, 1440);
     this.elevatorZone.receiveShadow = true;
     this.scene.add(this.elevatorZone);
+  }
+
+  private addWallFromLayout(layout: ElevatorBoxLayout) {
+    this.addWall(layout.x, layout.z, layout.width, layout.depth);
   }
 
   private addChairs() {
