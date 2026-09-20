@@ -3,9 +3,22 @@ export const MAP = {
   depth: 1720,
 };
 
+export type EnemyKind = "bug" | "changeRequest" | "meeting" | "boss";
+export type RegularEnemyKind = Exclude<EnemyKind, "boss">;
+
+export const REGULAR_ENEMY_ACTIVE_LIMITS = {
+  bug: 5,
+  changeRequest: 4,
+  meeting: 3,
+} satisfies Record<RegularEnemyKind, number>;
+
 export const GAME = {
   duration: 120,
-  maxEnemies: 18,
+  maxEnemies:
+    REGULAR_ENEMY_ACTIVE_LIMITS.bug
+    + REGULAR_ENEMY_ACTIVE_LIMITS.changeRequest
+    + REGULAR_ENEMY_ACTIVE_LIMITS.meeting
+    + 1,
   elevatorHoldTime: 2,
 };
 
@@ -43,8 +56,6 @@ export const COLORS = {
   elevatorClosed: 0x737b86,
   elevatorOpen: 0x22c55e,
 };
-
-export type EnemyKind = "bug" | "changeRequest" | "meeting" | "boss";
 
 export type EnemyConfig = {
   color: number;

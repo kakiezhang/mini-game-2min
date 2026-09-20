@@ -2,6 +2,7 @@ import * as THREE from "three";
 import "./styles.css";
 import { EnemyAiSystem } from "./ai/enemy-ai-system";
 import type { EnemyAiRuntime } from "./ai/enemy-ai-runtime";
+import { countActiveEnemyKinds } from "./ai/enemy-spawn-selection";
 import {
   CharacterAssetStore,
   StaticCharacterVisual,
@@ -927,6 +928,7 @@ class OfficeEscapeGame {
         gameElapsed: this.elapsed,
         gameState: this.gameState,
         enemyCount: this.enemies.length,
+        enemyKindCounts: countActiveEnemyKinds(this.enemies),
         animatedEnemyCount: this.enemies.reduce((count, enemy) => (
           count + (ENEMY_CHARACTER_MODELS[enemy.kind] ? 1 : 0)
         ), 0),
@@ -1034,7 +1036,8 @@ class OfficeEscapeGame {
     const availableSlots = Math.max(0, GAME.maxEnemies - this.enemies.length - reservedBossSlots);
     const spawnCount = Math.min(stage.count, availableSlots);
     for (let i = 0; i < spawnCount; i += 1) {
-      const kind = this.enemyAi.pickSpawnKind(stage.weights);
+      const kind = this.enemyAi.pickSpawnKind(stage.weights, this.enemies);
+      if (!kind) break;
       this.performanceMonitor.measureSpawn(kind, this.elapsed, () => this.spawnEnemy(kind));
     }
     this.spawnTimer = stage.interval;

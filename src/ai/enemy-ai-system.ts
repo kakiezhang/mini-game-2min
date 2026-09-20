@@ -41,9 +41,7 @@ import {
   type EnemyMovementSample,
 } from "./enemy-ai-runtime";
 import { SeededRandom } from "./seeded-random";
-
-type RegularEnemyKind = Exclude<EnemyKind, "boss">;
-type SpawnWeights = Record<RegularEnemyKind, number>;
+import { pickAvailableSpawnKind, type SpawnWeights } from "./enemy-spawn-selection.js";
 
 export type EnemyAiDevelopmentOptions = {
   seed: number;
@@ -150,13 +148,9 @@ export class EnemyAiSystem {
     return this.randomSource.integer(maxExclusive);
   }
 
-  pickSpawnKind(weights: SpawnWeights): EnemyKind {
+  pickSpawnKind(weights: SpawnWeights, activeEnemies: Iterable<{ kind: EnemyKind }>): EnemyKind | undefined {
     if (this.options.forcedKind) return this.options.forcedKind;
-    const total = weights.bug + weights.changeRequest + weights.meeting;
-    const roll = this.random() * total;
-    if (roll < weights.bug) return "bug";
-    if (roll < weights.bug + weights.changeRequest) return "changeRequest";
-    return "meeting";
+    return pickAvailableSpawnKind(weights, activeEnemies, () => this.random());
   }
 
   createRuntime(id: number, kind: EnemyKind, x: number, z: number, now: number) {

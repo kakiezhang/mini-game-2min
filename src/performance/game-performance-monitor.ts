@@ -1,5 +1,6 @@
 import type * as THREE from "three";
 import type { EnemyKind } from "../config";
+import type { EnemyKindCounts } from "../ai/enemy-spawn-selection";
 import type { NavigationPerformanceMetrics, NavigationWorld } from "../navigation";
 import { renderPerformanceProfile } from "./render-performance-profile";
 
@@ -9,6 +10,7 @@ type FrameContext = {
   gameElapsed: number;
   gameState: string;
   enemyCount: number;
+  enemyKindCounts: EnemyKindCounts;
   animatedEnemyCount: number;
   rendererInfo: THREE.WebGLInfo;
 };
@@ -258,6 +260,7 @@ export class GamePerformanceMonitor {
       gameElapsed: round(context.gameElapsed),
       gameState: context.gameState,
       enemyCount: context.enemyCount,
+      enemyKindCounts: context.enemyKindCounts,
       animatedEnemyCount: context.animatedEnemyCount,
       renderer: {
         calls: render.calls,

@@ -17,10 +17,12 @@
     "src/ai/enemy-crowd-movement.ts",
     "src/ai/enemy-movement-failure.ts",
     "src/ai/enemy-movement-recovery.ts",
+    "src/ai/enemy-spawn-selection.ts",
     "tests/enemy-ai-telemetry.test.ts",
     "tests/enemy-ai-behavior.test.ts",
     "tests/enemy-approach-slots.test.ts",
     "tests/enemy-crowd-movement.test.ts",
-    "tests/enemy-movement-failure.test.ts"
+    "tests/enemy-movement-failure.test.ts",
+    "tests/enemy-spawn-selection.test.ts"
   ]
 }
