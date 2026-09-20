@@ -33,6 +33,7 @@ import { InputController, type InputState } from "./input";
 import { NavigationWorld, type Obstacle } from "./navigation";
 import { GamePerformanceMonitor } from "./performance/game-performance-monitor";
 import { createDynamicPointLight } from "./performance/render-performance-profile";
+import { GameMinimap } from "./ui/game-minimap";
 import { WeaponSystem } from "./weapon";
 import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 
@@ -194,6 +195,7 @@ class OfficeEscapeGame {
   };
 
   private readonly hud = this.createHud();
+  private readonly minimap = new GameMinimap(this.hud.minimap, this.navigation, MAP);
 
   constructor() {
     this.app.innerHTML = "";
@@ -210,6 +212,7 @@ class OfficeEscapeGame {
     this.setupCamera();
     this.createLights();
     this.createMap();
+    this.minimap.update(0, this.playerState, this.enemies);
     const charactersReady = Promise.all([
       this.createPlayer(),
       this.characterAssets.preload(CHARACTER_MODELS.bug),
@@ -971,6 +974,7 @@ class OfficeEscapeGame {
     this.updateParticles(delta);
     this.updateShotEffects(delta);
     this.trySpawnEnemies();
+    this.minimap.update(delta, this.playerState, this.enemies);
     this.updateCamera(delta);
     this.updateObjectiveArrow();
     this.refreshHud();
@@ -1998,7 +2002,11 @@ class OfficeEscapeGame {
     if (this.accessCard) {
       return { title: "取得门禁卡", body: "前往黄色光柱处拾取门禁卡", meta: "CARD" };
     }
-    return { title: "生存并清场", body: `门禁卡将在 ${Math.max(0, Math.ceil(35 - this.elapsed))} 秒后出现`, meta: "SURVIVE" };
+    return {
+      title: "拿门禁卡，乘电梯撤离",
+      body: "存活到电梯开放，进入 EXIT 区域完成撤离",
+      meta: "门禁卡 → 电梯 → 下班",
+    };
   }
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
@@ -2015,8 +2023,10 @@ class OfficeEscapeGame {
     if (!GAME_STATE_TRANSITIONS[this.gameState].includes(nextState)) {
       throw new Error(`Invalid game state transition: ${this.gameState} -> ${nextState}`);
     }
+    const isLevelEntry = this.gameState === "ready" && nextState === "playing";
     this.gameState = nextState;
     this.hud.root.dataset.gameState = nextState;
+    if (isLevelEntry) this.hud.missionPanel.classList.add("is-intro-visible");
   }
 
   private resize() {
@@ -2439,19 +2449,31 @@ class OfficeEscapeGame {
     const root = document.createElement("div");
     root.className = "ui-root";
     root.innerHTML = `
-      <div class="hud-panel">
-        <div class="hp-label">HP 100/100</div>
-        <div class="hp-track"><div class="hp-fill"></div></div>
+      <div class="minimap-panel">
+        <canvas class="minimap-canvas" width="240" height="336" aria-label="实时地图"></canvas>
+      </div>
+      <div class="timer-panel">
         <div class="timer">120</div>
-        <div class="level">Lv 1</div>
-        <div class="card">无卡</div>
+        <div class="timer-caption">距离下班</div>
+      </div>
+      <div class="hud-panel">
+        <div class="status-header"><div class="level">Lv 1</div><div class="card">无卡</div></div>
+        <div class="health-row">
+          <div class="hp-label">HP 100/100</div>
+          <div class="hp-track"><div class="hp-fill"></div></div>
+        </div>
         <div class="exp-track"><div class="exp-fill"></div></div>
+        <div class="weapon-panel">
+          <div class="weapon-status">冲锋枪</div>
+          <div class="ammo">20 / 80</div>
+          <div class="reload-track"><div class="reload-fill"></div></div>
+        </div>
       </div>
       <div class="mission-panel">
-        <div class="mission-kicker">OBJECTIVE</div>
-        <div class="mission-title">生存并清场</div>
-        <div class="mission-body">门禁卡将在 35 秒后出现</div>
-        <div class="mission-meta">SURVIVE</div>
+        <div class="mission-kicker">通关目标</div>
+        <div class="mission-title">拿门禁卡，乘电梯撤离</div>
+        <div class="mission-body">存活到电梯开放，进入 EXIT 区域完成撤离</div>
+        <div class="mission-meta">门禁卡 → 电梯 → 下班</div>
       </div>
       <div class="alert-banner">老板来了，立即撤离</div>
       <div class="hint">距离下班还有 120 秒</div>
@@ -2459,11 +2481,6 @@ class OfficeEscapeGame {
       <div class="objective-arrow"></div>
       <div class="objective-label"></div>
       <div class="joystick"><div class="joystick-knob"></div></div>
-      <div class="weapon-panel">
-        <div class="weapon-status">冲锋枪</div>
-        <div class="ammo">20 / 80</div>
-        <div class="reload-track"><div class="reload-fill"></div></div>
-      </div>
       <button class="fire-button" type="button" aria-label="射击" title="射击"><span class="fire-icon"></span></button>
       <button class="reload-button" type="button" aria-label="换弹" title="换弹">R</button>
       <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
@@ -2487,12 +2504,14 @@ class OfficeEscapeGame {
 
     return {
       root,
+      minimap: root.querySelector<HTMLCanvasElement>(".minimap-canvas")!,
       hpText: root.querySelector<HTMLDivElement>(".hp-label")!,
       hpBar: root.querySelector<HTMLDivElement>(".hp-fill")!,
       expBar: root.querySelector<HTMLDivElement>(".exp-fill")!,
       timer: root.querySelector<HTMLDivElement>(".timer")!,
       level: root.querySelector<HTMLDivElement>(".level")!,
       card: root.querySelector<HTMLDivElement>(".card")!,
+      missionPanel: root.querySelector<HTMLDivElement>(".mission-panel")!,
       missionTitle: root.querySelector<HTMLDivElement>(".mission-title")!,
       missionBody: root.querySelector<HTMLDivElement>(".mission-body")!,
       missionMeta: root.querySelector<HTMLDivElement>(".mission-meta")!,

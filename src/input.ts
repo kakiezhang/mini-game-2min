@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+const JOYSTICK_MAX_DISTANCE = 44;
+
 export type InputState = {
   moveX: number;
   moveZ: number;
@@ -192,13 +194,12 @@ export class InputController {
   };
 
   private updateJoystick(clientX: number, clientY: number) {
-    const maxDistance = 58;
     const deltaX = clientX - this.joystickCenterX;
     const deltaY = clientY - this.joystickCenterY;
-    const distance = Math.min(Math.hypot(deltaX, deltaY), maxDistance);
+    const distance = Math.min(Math.hypot(deltaX, deltaY), JOYSTICK_MAX_DISTANCE);
     const angle = Math.atan2(deltaY, deltaX);
-    this.joystickX = (Math.cos(angle) * distance) / maxDistance;
-    this.joystickZ = (Math.sin(angle) * distance) / maxDistance;
+    this.joystickX = (Math.cos(angle) * distance) / JOYSTICK_MAX_DISTANCE;
+    this.joystickZ = (Math.sin(angle) * distance) / JOYSTICK_MAX_DISTANCE;
     this.joystick.knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
   }
 

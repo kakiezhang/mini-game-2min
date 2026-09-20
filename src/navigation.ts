@@ -94,6 +94,10 @@ export class NavigationWorld {
     this.invalidateNavigationCaches();
   }
 
+  getObstacles(): readonly Readonly<Obstacle>[] {
+    return this.obstacles;
+  }
+
   setPerformanceTracking(enabled: boolean) {
     this.performanceTracking = enabled;
   }
