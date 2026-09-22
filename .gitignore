@@ -12,6 +12,8 @@ dist/
 !src/assets/textures/*.png
 *.glb
 !ksman_walk_1k_meshopt.glb
+!ksman_v2_walk_1k_meshopt.glb
+!ksman_v3_walk_1k_meshopt.glb
 !bug_walk_1k_meshopt.glb
 !ppt_walk_1k_meshopt.glb
 !change_request_walk_1k_meshopt.glb

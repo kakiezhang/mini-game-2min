@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b10" />
+    <title>角色动作验收台</title>
+  </head>
+  <body>
+    <main id="character-preview-app">
+      <canvas id="character-preview-canvas" aria-label="3D 角色动作预览"></canvas>
+
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CHARACTER MOTION REVIEW</p>
+          <h1>角色动作验收台</h1>
+        </div>
+        <div class="status-pill" id="load-status" data-state="loading">
+          <span class="status-dot"></span>
+          <span id="load-status-text">正在加载模型</span>
+        </div>
+      </header>
+
+      <aside class="info-panel" aria-label="模型信息">
+        <div class="file-row">
+          <div>
+            <span class="field-label">当前模型</span>
+            <strong id="file-name">ksman_v2_walk_1k_meshopt.glb</strong>
+          </div>
+          <label class="file-button">
+            更换 GLB
+            <input id="model-file" type="file" accept=".glb,model/gltf-binary" />
+          </label>
+        </div>
+        <dl class="stats-grid">
+          <div><dt>动作</dt><dd id="stat-animation">—</dd></div>
+          <div><dt>时长</dt><dd id="stat-duration">—</dd></div>
+          <div><dt>三角面</dt><dd id="stat-triangles">—</dd></div>
+          <div><dt>骨骼</dt><dd id="stat-bones">—</dd></div>
+        </dl>
+        <p class="review-hint">拖动旋转 · 滚轮缩放 · 双击恢复视角</p>
+      </aside>
+
+      <section class="transport" aria-label="动画控制">
+        <div class="transport-main">
+          <button id="play-toggle" class="play-button" type="button" aria-label="暂停动画">Ⅱ</button>
+          <div class="timeline-wrap">
+            <div class="timeline-meta">
+              <select id="animation-select" aria-label="选择动作"></select>
+              <output id="time-output">0.00 / 0.00 s</output>
+            </div>
+            <input id="timeline" class="timeline" type="range" min="0" max="1" step="0.001" value="0" aria-label="动画时间轴" />
+          </div>
+        </div>
+        <div class="transport-options">
+          <label class="speed-control">
+            <span>速度 <output id="speed-output">1.00×</output></span>
+            <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1" />
+          </label>
+          <label class="toggle-control"><input id="loop-toggle" type="checkbox" checked /><span></span>循环</label>
+          <label class="toggle-control"><input id="skeleton-toggle" type="checkbox" /><span></span>骨骼</label>
+          <button id="reset-view" class="secondary-button" type="button">恢复视角</button>
+        </div>
+      </section>
+
+      <div id="drop-zone" class="drop-zone" aria-hidden="true">
+        <div><strong>放开以预览 GLB</strong><span>文件只在当前浏览器中打开</span></div>
+      </div>
+    </main>
+    <script type="module" src="/src/character-preview.ts"></script>
+  </body>
+</html>

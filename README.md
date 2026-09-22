@@ -40,6 +40,14 @@ make dev
 http://localhost:6173
 ```
 
+检查角色蒙皮和动作时，可打开独立的角色动作验收台：
+
+```text
+http://localhost:6173/character-preview.html
+```
+
+验收台默认加载仓库根目录下的 `ksman_v3_walk_1k_meshopt.glb`，支持旋转、缩放、播放暂停、逐帧拖动、播放速度、循环和骨骼显示；也可以直接拖入其他 `.glb` 文件进行对比。
+
 也可直接使用 npm：
 
 ```bash

@@ -3,7 +3,7 @@ import type { EnemyKind } from "../config";
 
 export const CHARACTER_MODELS = {
   player: {
-    url: new URL("../../ksman_walk_1k_meshopt.glb", import.meta.url).href,
+    url: new URL("../../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href,
     height: 118,
     idlePose: 0.5,
     clips: {
