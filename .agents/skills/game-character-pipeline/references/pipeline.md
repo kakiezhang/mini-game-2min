@@ -60,7 +60,7 @@ Upload `<slug>_for_mixamo.fbx`, complete the chin, wrist, elbow, knee, and groin
 - format: `FBX Binary`;
 - skin: `With Skin` for the first self-contained animated model.
 
-Download as `<slug>_walk.fbx`. Use `Without Skin` only for additional animation clips after a deliberate retarget/merge workflow exists; the current runtime asset path expects a self-contained skinned Walk model.
+Download as `<slug>_walk.fbx`. Additional clips use `Without Skin` and the existing repository script `scripts/merge_character_animations.py` with the original skinned Walk FBX as their base. The final runtime GLB remains self-contained with one mesh/rig and multiple clips. For additional-clip rest-pose differences or wrist deformation, read [角色动画调优经验](../../../../docs/角色动画调优经验.md) and use the current multi-clip export command in the project README; the single-Walk conversion below does not preserve those additional clips or their corrections.
 
 ## Convert and optimize
 

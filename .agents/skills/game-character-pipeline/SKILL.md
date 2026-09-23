@@ -1,6 +1,6 @@
 ---
 name: game-character-pipeline
-description: Prepare and integrate animated 3D characters for this mini-game using its established four-view, Hunyuan, Mixamo, Blender, and 1K WebP/Meshopt GLB workflow. Use for character image prompts and naming, view splitting, model conversion or optimization, pipeline artifact checks, and replacing procedural game characters; do not use for unrelated 3D props or gameplay-only work.
+description: Prepare and integrate animated 3D characters for this mini-game using its established four-view, Hunyuan, Mixamo, Blender, and 1K WebP/Meshopt GLB workflow. Use for character image prompts and naming, view splitting, model conversion or optimization, animation merging and deformation diagnosis, pipeline artifact checks, and replacing procedural game characters; do not use for unrelated 3D props or gameplay-only work.
 ---
 
 # Game Character Pipeline
@@ -13,6 +13,7 @@ Use a short lowercase character slug such as `bug` or `ppt`. Preserve existing p
 
 - Read [references/pipeline.md](references/pipeline.md) when preparing prompts, splitting views, using Hunyuan or Mixamo, converting files, or optimizing a model.
 - Read [references/runtime-integration.md](references/runtime-integration.md) only when the optimized GLB is ready to be registered or validated in the game.
+- Read the project case note [角色动画调优经验](../../../docs/角色动画调优经验.md) when merging additional clips or diagnosing wrist pinching, forearm twist, or similar skinning deformation. It records the Shoot wrist case, reproducible export option, and regression checks. Establish whether source poses, retargeting, compression, or skinning caused the symptom before applying a correction; the case's 50% twist sharing is asset-specific.
 
 ## Invariants
 

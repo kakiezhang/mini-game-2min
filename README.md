@@ -61,7 +61,8 @@ http://localhost:6173/character-preview.html
   --python scripts/merge_character_animations.py -- \
   ksman_v3_walk.fbx ksman_v3_walk.glb \
   --clip Idle=ksman_v3_idle.fbx --clip-range Idle=61:151 \
-  --clip-loop-blend Idle=18 --force
+  --clip-loop-blend Idle=18 \
+  --clip Shoot=ksman_v3_shoot.fbx --clip-forearm-twist Shoot=Left:0.5 --force
 npx --yes @gltf-transform/cli@4.5.0 optimize \
   ksman_v3_walk.glb ksman_v3_walk_1k_meshopt.glb \
   --compress meshopt --meshopt-level medium --resample false \
@@ -69,6 +70,10 @@ npx --yes @gltf-transform/cli@4.5.0 optimize \
 ```
 
 这里保留动画采样精度，避免压缩步骤再次引入手指旋转误差；`Walk` 和 `Idle` 共用同一个模型与骨架。
+
+Shoot 左手与前臂相对于绑定姿势的变形存在约 140° 扭转差，会使线性蒙皮在腕部拧细；这里不是人体腕关节角度。`--clip-forearm-twist Shoot=Left:0.5` 将一半扭转分摊到左前臂，再补偿手部局部变换，保持手掌／手指的世界姿势和所有关节位置。此修正只作用于 Shoot，不改模型权重或 Idle／Walk；再生成时应保留该选项。
+
+排查证据、修复原理、参数适用范围及前后对比方法记录在 [角色动画调优经验](docs/角色动画调优经验.md)。遇到手腕变细、扭转塌缩或类似“莲藕人”现象时可从这里开始排查。
 
 循环回归检查：`node scripts/validate_character_loop.mjs ksman_v3_walk_1k_meshopt.glb`。检查 65 根骨骼的首尾姿势、接缝速度、连续循环和克隆实例独立性；可追加改动前 GLB 的路径，验证前 2.4 秒以及整个 `Walk` 没有变化。
 

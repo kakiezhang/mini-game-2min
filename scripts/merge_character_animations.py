@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
         help="Blend the final frames to the opening pose and motion for a clean loop",
     )
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--clip-forearm-twist", action="append", default=[],
+        metavar="NAME=SIDE:FRACTION",
+        help="Share wrist twist with Left/Right forearm, preserving hand pose (e.g. Shoot=Left:0.5)",
+    )
     return parser.parse_args(values)
 
 
@@ -75,6 +80,47 @@ def parse_named_int(value: str, label: str) -> tuple[str, int]:
     if number < 0:
         raise SystemExit(f"Invalid {label} {value!r}; NUMBER must be >= 0")
     return name.strip(), number
+
+
+def parse_forearm_twist(value: str) -> tuple[str, tuple[str, float]]:
+    name, separator, settings = value.partition("=")
+    side, colon, fraction = settings.partition(":")
+    if not name.strip() or not separator or not colon or side not in ("Left", "Right"):
+        raise SystemExit(f"Invalid forearm twist {value!r}; expected NAME=Left|Right:FRACTION")
+    amount = float(fraction)
+    if not 0 <= amount <= 1:
+        raise SystemExit("Forearm twist fraction must be between 0 and 1")
+    return name.strip(), (side, amount)
+
+
+def share_forearm_twist(desired: dict, armature: bpy.types.Object, side: str,
+                       fraction: float, previous: float | None) -> float:
+    """Redistribute roll, without changing elbow/wrist positions or hand pose.
+
+    Use deformation rotations relative to the skinned rig's rest pose, not
+    source FBX local rotations: Mixamo downloads may have different rest axes.
+    Only the forearm world matrix changes; baking the unchanged hand/children
+    against this new parent counter-rotates them automatically.
+    """
+    forearm_name, hand_name = f"mixamorig:{side}ForeArm", f"mixamorig:{side}Hand"
+    forearm, hand = armature.data.bones[forearm_name], armature.data.bones[hand_name]
+    arm_deform = desired[forearm_name] @ forearm.matrix_local.inverted()
+    hand_deform = desired[hand_name] @ hand.matrix_local.inverted()
+    relative = arm_deform.to_quaternion().inverted() @ hand_deform.to_quaternion()
+    rest_axis = (hand.head_local - forearm.head_local).normalized()
+    angle = 2 * math.atan2(Vector((relative.x, relative.y, relative.z)).dot(rest_axis), relative.w)
+    angle = (angle + math.pi) % (2 * math.pi) - math.pi
+    if previous is not None:
+        angle += round((previous - angle) / (2 * math.pi)) * 2 * math.pi
+    elbow, wrist = desired[forearm_name].translation, desired[hand_name].translation
+    axis = (wrist - elbow).normalized()
+    desired[forearm_name] = (
+        Matrix.Translation(elbow)
+        @ Quaternion(axis, angle * fraction).to_matrix().to_4x4()
+        @ Matrix.Translation(-elbow)
+        @ desired[forearm_name]
+    )
+    return angle
 
 
 def import_fbx(path: Path) -> tuple[list[bpy.types.Object], list[bpy.types.Action]]:
@@ -176,6 +222,7 @@ def bake_action_onto_armature(
     frame_range: tuple[int, int] | None = None,
     smooth_radius: int = 0,
     loop_blend_frames: int = 0,
+    forearm_twists: list[tuple[str, float]] | None = None,
 ) -> bpy.types.Action:
     source_armature.animation_data.action = source_action
     if target_armature.animation_data is None:
@@ -203,6 +250,7 @@ def bake_action_onto_armature(
         bone.name: [] for bone in target_bones
     }
     reference_poses = []
+    twist_history = {side: [] for side, _fraction in forearm_twists or []}
 
     for source_frame in range(source_start, source_end + 1):
         bpy.context.scene.frame_set(source_frame)
@@ -211,6 +259,11 @@ def bake_action_onto_armature(
             bone.name: source_to_target @ source_armature.pose.bones[bone.name].matrix.copy()
             for bone in target_bones
         }
+        for side, fraction in forearm_twists or []:
+            history = twist_history[side]
+            history.append(share_forearm_twist(
+                desired, target_armature, side, fraction, history[-1] if history else None,
+            ))
         reference_poses.append(desired)
         for target_bone in target_bones:
             parent = target_bone.parent
@@ -299,6 +352,11 @@ def bake_action_onto_armature(
         "max_matrix_error": max_matrix_error, "max_position_error": max_position_error,
         "loop_blend_frames": blend_count,
         "max_unchanged_matrix_error": max_unchanged_matrix_error,
+        "forearm_twist_adjustments": [
+            {"side": side, "fraction": fraction,
+             "source_twist_degrees": [math.degrees(min(twist_history[side])), math.degrees(max(twist_history[side]))]}
+            for side, fraction in forearm_twists or []
+        ],
     }))
     if smooth_radius == 0 and max_unchanged_matrix_error > 0.0001:
         raise SystemExit("Baked animation does not reproduce source bone poses")
@@ -324,6 +382,15 @@ def main() -> None:
     clip_loop_blends = dict(
         parse_named_int(value, "clip loop blend") for value in args.clip_loop_blend
     )
+    clip_forearm_twists = {}
+    for value in args.clip_forearm_twist:
+        name, adjustment = parse_forearm_twist(value)
+        if name not in {name for name, _path in clips}:
+            raise SystemExit(f"Forearm twist references unknown clip {name!r}")
+        entries = clip_forearm_twists.setdefault(name, [])
+        if any(side == adjustment[0] for side, _fraction in entries):
+            raise SystemExit(f"Duplicate forearm twist adjustment: {value!r}")
+        entries.append(adjustment)
 
     for label, path in [("Base FBX", base_path), *[(name, path) for name, path in clips]]:
         if not path.is_file():
@@ -382,6 +449,7 @@ def main() -> None:
             frame_range=clip_ranges.get(clip_name),
             smooth_radius=clip_smoothing.get(clip_name, 0),
             loop_blend_frames=clip_loop_blends.get(clip_name, 0),
+            forearm_twists=clip_forearm_twists.get(clip_name),
         )
         animation_actions.append(action)
 
