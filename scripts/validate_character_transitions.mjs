@@ -57,9 +57,137 @@ controller.update(runtimeShoot.duration);
 assert.equal(controller.getSnapshot().state, 'walk');
 controller.update(0.12);
 assert.equal(controller.getSnapshot().actions.find(action => action.state === 'walk').weight, 1);
+controller.setMovement(0, 0); controller.update(0.12);
+let shootStarts = 0, maxShootTime = 0, zeroTimeShootError = 0;
+for (let frame = 0; frame < 270; frame++) {
+  // The actual SMG fires five rounds per second; the 1.33-second Shoot clip
+  // must advance to its end instead of restarting on every round.
+  if (frame % 12 === 0) {
+    const before = matrices();
+    if (controller.playOneShot('shoot', { restartIfActive: false })) shootStarts++;
+    matrices().forEach((matrix, index) => matrix.forEach((value, component) => {
+      zeroTimeShootError = Math.max(zeroTimeShootError, Math.abs(value - before[index][component]));
+    }));
+    assert.ok(zeroTimeShootError < 1e-6, `Shoot pose jumps when starting or skipping a round: ${zeroTimeShootError}`);
+  }
+  controller.update(1 / 60);
+  const snapshot = controller.getSnapshot();
+  maxShootTime = Math.max(maxShootTime, snapshot.actions.find(action => action.state === 'shoot').time);
+  assert.ok(Math.abs(snapshot.actions.reduce((sum, action) => sum + action.weight, 0) - 1) < 1e-9);
+}
+assert.ok(shootStarts >= 3 && shootStarts <= 4, `Unexpected Shoot start count during SMG fire: ${shootStarts}`);
+assert.ok(maxShootTime > runtimeShoot.duration * 0.9, 'Shoot does not progress through its full clip');
+assert.ok(controller.stopOneShot('shoot'), 'Reload should stop the active Shoot clip');
+controller.update(0.12);
+assert.equal(controller.getSnapshot().state, 'idle');
+assert.equal(controller.getSnapshot().actions.find(action => action.state === 'idle').weight, 1);
+
+// Shooting must leave the actual player's hips and legs on the Walk/Idle pose.
+const layeredRoot = clone(asset.scene), locomotionRoot = clone(asset.scene);
+const layered = new CharacterAnimationController(layeredRoot, asset.animations, {
+  clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i }, shootUpperBodyOnly: true,
+  shootPulseEndSeconds: 0.3,
+});
+const locomotion = new CharacterAnimationController(locomotionRoot, asset.animations, {
+  clips: { idle: /^idle$/i, walk: /^walk$/i },
+});
+const upperBoneNames = new Set();
+layeredRoot.getObjectByName('mixamorigSpine').traverse(object => {
+  if (object.isBone) upperBoneNames.add(object.name);
+});
+const lowerBoneNames = bones.map(bone => bone.name).filter(name => !upperBoneNames.has(name));
+const compareLowerBody = () => {
+  layeredRoot.updateMatrixWorld(true); locomotionRoot.updateMatrixWorld(true);
+  let error = 0;
+  for (const name of lowerBoneNames) {
+    const actual = layeredRoot.getObjectByName(name).matrixWorld.elements;
+    const expected = locomotionRoot.getObjectByName(name).matrixWorld.elements;
+    for (let index = 0; index < 16; index++) error = Math.max(error, Math.abs(actual[index] - expected[index]));
+  }
+  assert.ok(error < 1e-6, `Shoot overrides the locomotion legs: ${error}`);
+  return error;
+};
+layered.setMovement(1, 0); locomotion.setMovement(1, 0);
+layered.update(0.25); locomotion.update(0.25);
+assert.ok(layered.playOneShot('shoot'));
+const singlePulseDuration = layered.getSnapshot().actions.find(action => action.state === 'shoot').duration;
+assert.ok(singlePulseDuration > 0.29 && singlePulseDuration < 0.31,
+  `Single shot must stop before the source clip's second recoil: ${singlePulseDuration}`);
+layered.update(0.12); locomotion.update(0.12);
+let lowerBodyPoseError = compareLowerBody();
+assert.ok(layered.getSnapshot().actions.find(action => action.state === 'shoot').weight > 0.99);
+const shootSpine = layeredRoot.getObjectByName('mixamorigSpine');
+const walkSpine = locomotionRoot.getObjectByName('mixamorigSpine');
+assert.ok(shootSpine.quaternion.angleTo(walkSpine.quaternion) > 0.05, 'Shoot does not animate the upper body');
+layered.setMovement(0, 0); locomotion.setMovement(0, 0);
+layered.update(0.1); locomotion.update(0.1);
+lowerBodyPoseError = Math.max(lowerBodyPoseError, compareLowerBody());
+assert.equal(layered.getSnapshot().state, 'shoot', 'Changing locomotion should not interrupt Shoot');
+layered.update(0.1); locomotion.update(0.1);
+assert.equal(layered.getSnapshot().state, 'idle');
+// The upper Walk may restart at frame zero after Shoot while the leg Walk
+// continues. That puts the same-side arm and leg forward together.
+layered.setMovement(1, 0); locomotion.setMovement(1, 0);
+layered.update(0.31); locomotion.update(0.31);
+assert.ok(layered.playOneShot('shoot'));
+layered.update(0.45); locomotion.update(0.45);
+layered.update(0.15); locomotion.update(0.15);
+assert.equal(layered.getSnapshot().state, 'walk');
+const upperWalkTime = layered.getSnapshot().actions.find(action => action.state === 'walk').time;
+const legWalkTime = locomotion.getSnapshot().actions.find(action => action.state === 'walk').time;
+assert.ok(Math.abs(upperWalkTime - legWalkTime) < 1e-6,
+  `Upper Walk phase ${upperWalkTime} differs from leg Walk phase ${legWalkTime}`);
+layeredRoot.updateMatrixWorld(true); locomotionRoot.updateMatrixWorld(true);
+let returnedArmPoseError = 0;
+for (const name of ['mixamorigLeftArm', 'mixamorigRightArm']) {
+  const actual = layeredRoot.getObjectByName(name).matrixWorld.elements;
+  const expected = locomotionRoot.getObjectByName(name).matrixWorld.elements;
+  for (let index = 0; index < 16; index++) {
+    returnedArmPoseError = Math.max(returnedArmPoseError, Math.abs(actual[index] - expected[index]));
+  }
+}
+assert.ok(returnedArmPoseError < 1e-5, `Arms are out of phase after Shoot: ${returnedArmPoseError}`);
+
+// Five shots per second should each begin one short recoil. Alternating
+// actions blend the old and new pulse without a zero-time pose jump.
+let rapidShotPoseError = 0, rapidShotCount = 0;
+for (let frame = 0; frame < 60; frame++) {
+  if (frame % 12 === 0) {
+    layeredRoot.updateMatrixWorld(true);
+    const before = layeredRoot.getObjectByName('mixamorigRightArm').matrixWorld.clone();
+    assert.ok(layered.playOneShot('shoot'), `Shot ${rapidShotCount + 1} did not restart its recoil`);
+    rapidShotCount++;
+    layeredRoot.updateMatrixWorld(true);
+    const after = layeredRoot.getObjectByName('mixamorigRightArm').matrixWorld;
+    before.elements.forEach((value, index) => {
+      rapidShotPoseError = Math.max(rapidShotPoseError, Math.abs(value - after.elements[index]));
+    });
+    assert.ok(rapidShotPoseError < 1e-6, `Rapid-fire recoil snaps at frame ${frame}: ${rapidShotPoseError}`);
+  }
+  layered.update(1 / 60); locomotion.update(1 / 60);
+  lowerBodyPoseError = Math.max(lowerBodyPoseError, compareLowerBody());
+  const weight = layered.getSnapshot().actions.reduce((sum, action) => sum + action.weight, 0);
+  assert.ok(Math.abs(weight - 1) < 1e-6, `Rapid-fire weights do not add to one: ${weight}`);
+}
+assert.equal(rapidShotCount, 5);
+layered.update(0.42); locomotion.update(0.42);
+assert.equal(layered.getSnapshot().state, 'walk');
+layered.update(0.12); locomotion.update(0.12);
+assert.ok(layered.getSnapshot().actions.find(action => action.state === 'shoot').weight < 1e-6,
+  'Single-shot recoil should release the upper body after the last bullet');
+layeredRoot.updateMatrixWorld(true); locomotionRoot.updateMatrixWorld(true);
+for (const name of ['mixamorigLeftArm', 'mixamorigRightArm']) {
+  const actual = layeredRoot.getObjectByName(name).matrixWorld.elements;
+  const expected = locomotionRoot.getObjectByName(name).matrixWorld.elements;
+  for (let index = 0; index < 16; index++) {
+    assert.ok(Math.abs(actual[index] - expected[index]) < 1e-5,
+      `${name} remains out of phase after rapid fire`);
+  }
+}
+layered.dispose(); locomotion.dispose();
 
 // Exercise the game wrapper as well, including normalization and skin cloning.
-const config = { url: 'test-player', height: 118, clips: { idle: /^idle$/i, walk: /^walk$/i } };
+const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } };
 const player = new AnimatedCharacter(asset, config);
 const other = new AnimatedCharacter(asset, config);
 const bounds = new THREE.Box3().setFromObject(player.root);
@@ -72,7 +200,7 @@ for (let frame = 0; frame < 180; frame++) { player.setMovement(frame % 10 < 5 ? 
 other.root.updateMatrixWorld(true);
 assert.ok(otherBone.matrixWorld.equals(otherPose), 'Game instances share mutable bone state');
 player.dispose(); other.dispose(); controller.dispose();
-console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, height: 118, grounded: true, independent: true, shootFallback: true }));
+console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, zeroTimeShootError, lowerBodyPoseError, returnedArmPoseError, rapidShotPoseError, rapidShotCount, singlePulseDuration, height: 118, grounded: true, independent: true, shootFallback: true, shootStarts, maxShootTime }));
 
 // A 140-degree wrist deformation pinched the Shoot mesh. Guard against its
 // return in the compressed runtime asset, including interpolated half-frames.

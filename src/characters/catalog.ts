@@ -6,6 +6,8 @@ export const CHARACTER_MODELS = {
     url: new URL("../../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href,
     height: 118,
     idlePose: 0.5,
+    shootUpperBodyOnly: true,
+    shootPulseEndSeconds: 0.3,
     clips: {
       idle: /idle/i,
       walk: /walk/i,

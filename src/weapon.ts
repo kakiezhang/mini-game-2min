@@ -1,6 +1,7 @@
 import type { WeaponConfig, WeaponRuntimeStats } from "./config";
 
 export type WeaponUpdate = {
+  shotStarted: boolean;
   fired: boolean;
   dryFire: boolean;
   reloadStarted: boolean;
@@ -20,6 +21,7 @@ export class WeaponSystem {
   private magazineAmmo: number;
   private reserveAmmo: number;
   private nextShotAt = 0;
+  private pendingShotAt?: number;
   private reloadStartedAt = 0;
   private reloadEndsAt = 0;
   private isReloading = false;
@@ -45,14 +47,24 @@ export class WeaponSystem {
   }
 
   update(elapsed: number, fireHeld: boolean, reloadPressed: boolean): WeaponUpdate {
-    const result = { fired: false, dryFire: false, reloadStarted: false, reloadCompleted: false };
+    const result = { shotStarted: false, fired: false, dryFire: false, reloadStarted: false, reloadCompleted: false };
 
     if (this.isReloading && elapsed >= this.reloadEndsAt) {
       this.finishReload(elapsed);
       result.reloadCompleted = true;
     }
 
-    if (reloadPressed && this.startReload(elapsed)) result.reloadStarted = true;
+    if (reloadPressed && this.startReload(elapsed)) {
+      this.pendingShotAt = undefined;
+      result.reloadStarted = true;
+    }
+    if (this.pendingShotAt !== undefined) {
+      if (elapsed + 1e-9 < this.pendingShotAt) return result;
+      this.pendingShotAt = undefined;
+      this.magazineAmmo -= 1;
+      result.fired = true;
+      return result;
+    }
     if (!fireHeld || this.isReloading || elapsed < this.nextShotAt) return result;
 
     if (this.magazineAmmo <= 0) {
@@ -64,10 +76,18 @@ export class WeaponSystem {
       return result;
     }
 
-    this.magazineAmmo -= 1;
     const fireRateMultiplier = elapsed < this.postReloadBoostUntil ? this.stats.postReloadFireRateMultiplier : 1;
-    this.nextShotAt = elapsed + 1 / (this.stats.fireRate * fireRateMultiplier);
-    result.fired = true;
+    const attackInterval = 1 / (this.stats.fireRate * fireRateMultiplier);
+    this.nextShotAt = elapsed + attackInterval;
+    result.shotStarted = true;
+    // Start the animation now; the bullet, ammo, muzzle flash, and damage all
+    // happen together at the attack point, after the visual windup.
+    const windup = Math.min(Math.max(0, this.config.attackWindupSeconds), attackInterval * 0.9);
+    if (windup > 0) this.pendingShotAt = elapsed + windup;
+    else {
+      this.magazineAmmo -= 1;
+      result.fired = true;
+    }
     return result;
   }
 

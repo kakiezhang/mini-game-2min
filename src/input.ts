@@ -118,6 +118,8 @@ export class InputController {
 
   private onKeyDown = (event: KeyboardEvent) => {
     this.keys.add(event.code);
+    // Preserve a very short J tap even if keyup arrives before the next frame.
+    if (event.code === "KeyJ" && !event.repeat) this.fireQueued = true;
     if (event.code === "KeyR" && !event.repeat) this.reloadQueued = true;
   };
 

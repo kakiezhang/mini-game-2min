@@ -25,7 +25,7 @@ export const GAME = {
 export const PLAYER_CONFIG = {
   maxHp: 100,
   initialHp: 100,
-  baseSpeed: 122,
+  baseSpeed: 82,
   radius: 30,
   initialLevel: 1,
   initialExp: 0,
@@ -118,6 +118,7 @@ export type WeaponConfig = {
   attackMode: AttackMode;
   damage: number;
   fireRate: number;
+  attackWindupSeconds: number;
   range: number;
   spreadDegrees: number;
   criticalChance: number;
@@ -133,6 +134,7 @@ export const DEFAULT_WEAPON: WeaponConfig = {
   attackMode: "manual",
   damage: 18,
   fireRate: 5,
+  attackWindupSeconds: 0.1,
   range: 720,
   spreadDegrees: 2,
   criticalChance: 0,

@@ -143,6 +143,7 @@ class OfficeEscapeGame {
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
   private playerVisual?: CharacterVisual;
+  private pendingShotAim?: { x: number; z: number };
   private input?: InputController;
   private crosshair?: THREE.Group;
   private enemies: Enemy[] = [];
@@ -973,6 +974,7 @@ class OfficeEscapeGame {
     this.updateEnemies(delta);
     this.performanceMonitor.finishPhase("enemies", enemiesStartedAt);
     this.updateWeapon(input);
+    this.updatePlayerAnimation(delta, input);
     this.updateAmmoPickups(delta);
     this.updateAccessCard();
     this.updateEvacuation(delta);
@@ -1003,7 +1005,6 @@ class OfficeEscapeGame {
     this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.player.rotation.y = Math.atan2(input.aimX, input.aimZ);
-    this.updatePlayerAnimation(delta, input);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
     this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
   }
@@ -1321,7 +1322,19 @@ class OfficeEscapeGame {
 
   private updateWeapon(input: InputState) {
     const update = this.weapon.update(this.elapsed, input.fireHeld, input.reloadPressed);
-    if (update.fired) this.fireWeapon(input.aimX, input.aimZ);
+    if (update.reloadStarted) {
+      this.pendingShotAim = undefined;
+      this.playerVisual?.stopOneShot("shoot");
+    }
+    if (update.shotStarted) {
+      this.pendingShotAim = { x: input.aimX, z: input.aimZ };
+      this.playerVisual?.playOneShot("shoot");
+    }
+    if (update.fired) {
+      const aim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
+      this.pendingShotAim = undefined;
+      this.fireWeapon(aim.x, aim.z);
+    }
     if (update.reloadStarted && this.elapsed >= this.nextWeaponHintAt) {
       this.nextWeaponHintAt = this.elapsed + 0.8;
       this.showHint("换弹中");

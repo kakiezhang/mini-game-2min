@@ -4,6 +4,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import {
   CharacterAnimationController,
+  type CharacterActionPlaybackOptions,
   type CharacterAnimationState,
   type CharacterOneShotState,
 } from "./animation-controller.js";
@@ -16,6 +17,8 @@ export type CharacterModelConfig = {
   facingOffset?: number;
   animationSpeed?: number;
   idlePose?: number;
+  shootUpperBodyOnly?: boolean;
+  shootPulseEndSeconds?: number;
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
 };
 
@@ -27,7 +30,8 @@ export interface CharacterVisual {
   readonly root: THREE.Group;
   setMovement(directionX: number, directionZ: number): void;
   setState(state: CharacterAnimationState): void;
-  playOneShot(state: CharacterOneShotState): boolean;
+  playOneShot(state: CharacterOneShotState, options?: CharacterActionPlaybackOptions): boolean;
+  stopOneShot(state: CharacterOneShotState): boolean;
   update(delta: number): void;
   dispose(): void;
 }
@@ -59,7 +63,9 @@ export class StaticCharacterVisual implements CharacterVisual {
 
   setState(_state: CharacterAnimationState) {}
 
-  playOneShot(_state: CharacterOneShotState) { return false; }
+  playOneShot(_state: CharacterOneShotState, _options?: CharacterActionPlaybackOptions) { return false; }
+
+  stopOneShot(_state: CharacterOneShotState) { return false; }
 
   update(_delta: number) {}
 
@@ -120,8 +126,12 @@ export class AnimatedCharacter implements CharacterVisual {
     this.animation.setState(state);
   }
 
-  playOneShot(state: CharacterOneShotState) {
-    return this.animation.playOneShot(state);
+  playOneShot(state: CharacterOneShotState, options?: CharacterActionPlaybackOptions) {
+    return this.animation.playOneShot(state, options);
+  }
+
+  stopOneShot(state: CharacterOneShotState) {
+    return this.animation.stopOneShot(state);
   }
 
   setMovement(directionX: number, directionZ: number) {

@@ -212,6 +212,10 @@ const chooseAnimation = (index: number) => {
   timeline.value = "0";
   statAnimation.textContent = clip.name || `动作 ${index + 1}`;
   statDuration.textContent = `${formatTime(clip.duration)} 秒`;
+  if (reviewMode === "single") modeHint.textContent = clip.name.toLowerCase() === "shoot"
+    && fileName.textContent === DEFAULT_MODEL_NAME
+    ? "原始 Shoot 包含多次后坐力；切换测试显示游戏使用的单发片段"
+    : "查看单段动作与循环接缝";
   updatePlayButton();
   updateTimeDisplay();
 };
@@ -266,16 +270,32 @@ const setReviewMode = (mode: "single" | "transition") => {
   loopToggle.disabled = mode === "transition";
   isScrubbing = false;
   if (mode === "transition" && activeGltf) {
+    const spine = activeGltf.scene.getObjectByName("mixamorigSpine");
+    const shootUpperBodyOnly = spine instanceof THREE.Bone
+      && spine.parent?.name === "mixamorigHips"
+      && activeGltf.animations.some(clip => clip.name.toLowerCase() === "shoot");
+    const shootClip = activeGltf.animations.find(clip => clip.name.toLowerCase() === "shoot");
+    const shootPulseEndSeconds = shootUpperBodyOnly
+      && fileName.textContent === DEFAULT_MODEL_NAME && (shootClip?.duration ?? 0) > 0.31 ? 0.3 : undefined;
     transitionController = new CharacterAnimationController(activeGltf.scene, activeGltf.animations, {
       clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i },
+      shootUpperBodyOnly,
+      shootPulseEndSeconds,
     });
     transitionPaused = false;
     transitionPause.textContent = "暂停测试";
-    modeHint.textContent = "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
+    modeHint.textContent = shootPulseEndSeconds
+      ? "与游戏共用控制器 · 单发 Shoot 取原片前 0.30 秒、只覆盖上半身 · 腿部继续 Idle／Walk"
+      : shootUpperBodyOnly
+        ? "与游戏共用控制器 · Shoot 只覆盖上半身，腿部继续 Idle／Walk"
+        : "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
     updateTransitionDisplay();
   } else if (activeGltf) {
     chooseAnimation(Number(animationSelect.value));
-    modeHint.textContent = transitionModeButton.disabled ? "切换测试需要 Idle 和 Walk 两个动作" : "查看单段动作与循环接缝";
+    modeHint.textContent = transitionModeButton.disabled ? "切换测试需要 Idle 和 Walk 两个动作"
+      : activeClip?.name.toLowerCase() === "shoot" && fileName.textContent === DEFAULT_MODEL_NAME
+        ? "原始 Shoot 包含多次后坐力；切换测试显示游戏使用的单发片段"
+        : "查看单段动作与循环接缝";
   }
   resize();
 };
