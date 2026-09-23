@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
-export type CharacterAnimationState = "idle" | "walk" | "attack" | "hit" | "death";
+export type CharacterLocomotionState = "idle" | "walk";
+export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death";
+export type CharacterAnimationState = CharacterLocomotionState | CharacterOneShotState;
 export type CharacterAnimationConfig = {
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
   animationSpeed?: number;
@@ -8,6 +10,11 @@ export type CharacterAnimationConfig = {
 };
 
 export const CHARACTER_TRANSITION_SECONDS = 0.12;
+export const CHARACTER_ACTION_TRANSITION_SECONDS = 0.08;
+
+const isLocomotionState = (state: CharacterAnimationState): state is CharacterLocomotionState => (
+  state === "idle" || state === "walk"
+);
 
 /** Shared by the game and the motion review page; no preview-only blending. */
 export class CharacterAnimationController {
@@ -16,7 +23,10 @@ export class CharacterAnimationController {
   private readonly fromWeights = new Map<THREE.AnimationAction, number>();
   private activeAction?: THREE.AnimationAction;
   private state?: CharacterAnimationState;
+  private locomotionState: CharacterLocomotionState = "idle";
+  private oneShotState?: CharacterOneShotState;
   private elapsed = CHARACTER_TRANSITION_SECONDS;
+  private transitionDuration = CHARACTER_TRANSITION_SECONDS;
   private readonly idlePose: number;
 
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], config: CharacterAnimationConfig) {
@@ -37,66 +47,87 @@ export class CharacterAnimationController {
       this.actions.set(state, action);
     }
     if (!this.actions.size) throw new Error("Character contains none of the configured animation clips");
-    this.setState(this.actions.has("idle") || this.actions.has("walk") ? "idle" : this.actions.keys().next().value!);
+    if (this.actions.has("idle") || this.actions.has("walk")) this.activateLocomotion(true);
+    else {
+      const [state, action] = this.actions.entries().next().value!;
+      this.activate(state, action, 0, true);
+    }
     this.mixer.update(0);
   }
 
   setMovement(x: number, z: number) {
-    this.setState(Math.hypot(x, z) > 0.08 ? "walk" : "idle");
+    this.setLocomotion(Math.hypot(x, z) > 0.08 ? "walk" : "idle");
   }
 
   setState(state: CharacterAnimationState) {
-    if (state === this.state) return;
-    const frozenIdle = state === "idle" && !this.actions.has("idle");
-    const action = this.actions.get(frozenIdle ? "walk" : state);
-    if (!action) return;
+    if (isLocomotionState(state)) this.setLocomotion(state);
+    else this.playOneShot(state as CharacterOneShotState);
+  }
 
-    if (!this.activeAction || frozenIdle || action === this.activeAction) {
-      // Initial pose must have full weight before model bounds are measured.
-      // Legacy Walk-only monsters retain their frozen-pose Idle fallback.
-      for (const other of this.actions.values()) {
-        other.stopFading().setEffectiveWeight(other === action ? 1 : 0);
-      }
-      action.enabled = true;
-      action.play();
-      action.paused = frozenIdle;
-      if (frozenIdle) action.time = action.getClip().duration * this.idlePose;
-      this.elapsed = CHARACTER_TRANSITION_SECONDS;
-    } else {
+  setLocomotion(state: CharacterLocomotionState) {
+    if (state === this.locomotionState) return;
+    this.locomotionState = state;
+    // Movement remains current gameplay intent while a one-shot action owns the pose.
+    if (!this.oneShotState) this.activateLocomotion(false);
+  }
+
+  playOneShot(state: CharacterOneShotState) {
+    const action = this.actions.get(state);
+    if (!action) return false;
+
+    action.enabled = true;
+    action.paused = false;
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.reset().play();
+    this.oneShotState = state;
+
+    if (action === this.activeAction) {
+      // Rapid fire restarts time without creating a zero-weight frame.
+      action.setEffectiveWeight(1);
       this.fromWeights.clear();
-      for (const other of this.actions.values()) {
-        this.fromWeights.set(other, other.getEffectiveWeight());
-      }
-      // Reversing mid-blend must keep the contributing clip's time and weight.
-      if (action.getEffectiveWeight() === 0) action.reset();
-      action.enabled = true;
-      action.paused = false;
-      action.setEffectiveWeight(this.fromWeights.get(action) ?? 0).play();
-      this.elapsed = 0;
+      this.elapsed = this.transitionDuration;
+      this.state = state;
+      this.mixer.update(0);
+      return true;
     }
-    this.state = state;
-    this.activeAction = action;
-    this.mixer.update(0);
+
+    this.activate(state, action, CHARACTER_ACTION_TRANSITION_SECONDS, false);
+    return true;
   }
 
   update(delta: number) {
     if (!Number.isFinite(delta) || delta < 0) return;
-    if (this.elapsed < CHARACTER_TRANSITION_SECONDS) {
-      this.elapsed = Math.min(CHARACTER_TRANSITION_SECONDS, this.elapsed + delta);
-      const alpha = this.elapsed / CHARACTER_TRANSITION_SECONDS;
+    if (this.elapsed < this.transitionDuration) {
+      this.elapsed = Math.min(this.transitionDuration, this.elapsed + delta);
+      const alpha = this.transitionDuration <= 0 ? 1 : this.elapsed / this.transitionDuration;
       for (const action of this.actions.values()) {
-        const weight = THREE.MathUtils.lerp(this.fromWeights.get(action) ?? 0, action === this.activeAction ? 1 : 0, alpha);
+        const weight = THREE.MathUtils.lerp(
+          this.fromWeights.get(action) ?? 0,
+          action === this.activeAction ? 1 : 0,
+          alpha,
+        );
         action.setEffectiveWeight(weight);
       }
     }
     this.mixer.update(delta);
+
+    if (this.oneShotState && this.activeAction) {
+      const duration = this.activeAction.getClip().duration;
+      if (this.activeAction.time >= duration - 1e-6) {
+        this.oneShotState = undefined;
+        this.activateLocomotion(false);
+      }
+    }
   }
 
   getSnapshot() {
     return {
       state: this.state,
-      transitionDuration: CHARACTER_TRANSITION_SECONDS,
-      transitioning: this.elapsed < CHARACTER_TRANSITION_SECONDS,
+      locomotionState: this.locomotionState,
+      oneShotState: this.oneShotState,
+      transitionDuration: this.transitionDuration,
+      transitioning: this.elapsed < this.transitionDuration,
       actions: [...this.actions.entries()].map(([state, action]) => ({
         state, name: action.getClip().name, time: action.time,
         duration: action.getClip().duration, weight: action.getEffectiveWeight(),
@@ -107,5 +138,45 @@ export class CharacterAnimationController {
   dispose() {
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.mixer.getRoot());
+  }
+
+  private activateLocomotion(immediate: boolean) {
+    const frozenIdle = this.locomotionState === "idle" && !this.actions.has("idle");
+    const state: CharacterAnimationState = frozenIdle ? "walk" : this.locomotionState;
+    const action = this.actions.get(state);
+    if (!action) return;
+
+    action.enabled = true;
+    action.play();
+    action.paused = frozenIdle;
+    if (frozenIdle) action.time = action.getClip().duration * this.idlePose;
+    this.activate(this.locomotionState, action, immediate ? 0 : CHARACTER_TRANSITION_SECONDS, !frozenIdle);
+  }
+
+  private activate(
+    state: CharacterAnimationState,
+    action: THREE.AnimationAction,
+    duration: number,
+    resetIfInactive: boolean,
+  ) {
+    if (!this.activeAction) {
+      for (const other of this.actions.values()) other.setEffectiveWeight(other === action ? 1 : 0);
+      if (resetIfInactive && !action.paused) action.reset().play();
+      action.setEffectiveWeight(1);
+      this.elapsed = duration;
+    } else if (action === this.activeAction) {
+      action.setEffectiveWeight(1);
+      this.elapsed = duration;
+    } else {
+      this.fromWeights.clear();
+      for (const other of this.actions.values()) this.fromWeights.set(other, other.getEffectiveWeight());
+      if (resetIfInactive && action.getEffectiveWeight() === 0) action.reset().play();
+      action.setEffectiveWeight(this.fromWeights.get(action) ?? 0);
+      this.elapsed = 0;
+    }
+    this.transitionDuration = duration;
+    this.state = state;
+    this.activeAction = action;
+    this.mixer.update(0);
   }
 }

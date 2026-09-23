@@ -25,7 +25,7 @@ async function loadAsset(path) {
 }
 const asset = await loadAsset(new URL('../ksman_v3_walk_1k_meshopt.glb', import.meta.url));
 const root = clone(asset.scene);
-const controller = new CharacterAnimationController(root, asset.animations, { clips: { idle: /^idle$/i, walk: /^walk$/i } });
+const controller = new CharacterAnimationController(root, asset.animations, { clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } });
 const bones = [];
 root.traverse(object => { if (object.isBone) bones.push(object); });
 assert.equal(bones.length, 65);
@@ -47,6 +47,16 @@ for (let frame = 0; frame < 1200; frame++) {
 }
 controller.setMovement(0, 0); controller.update(0.2);
 assert.equal(controller.getSnapshot().actions.find(action => action.state === 'idle').weight, 1);
+const runtimeShoot = asset.animations.find(clip => clip.name === 'Shoot');
+assert.ok(runtimeShoot, 'Missing Shoot clip');
+assert.ok(controller.playOneShot('shoot'));
+controller.update(0.08);
+assert.equal(controller.getSnapshot().actions.find(action => action.state === 'shoot').weight, 1);
+controller.setMovement(1, 0);
+controller.update(runtimeShoot.duration);
+assert.equal(controller.getSnapshot().state, 'walk');
+controller.update(0.12);
+assert.equal(controller.getSnapshot().actions.find(action => action.state === 'walk').weight, 1);
 
 // Exercise the game wrapper as well, including normalization and skin cloning.
 const config = { url: 'test-player', height: 118, clips: { idle: /^idle$/i, walk: /^walk$/i } };
@@ -62,7 +72,7 @@ for (let frame = 0; frame < 180; frame++) { player.setMovement(frame % 10 < 5 ? 
 other.root.updateMatrixWorld(true);
 assert.ok(otherBone.matrixWorld.equals(otherPose), 'Game instances share mutable bone state');
 player.dispose(); other.dispose(); controller.dispose();
-console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, height: 118, grounded: true, independent: true }));
+console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, height: 118, grounded: true, independent: true, shootFallback: true }));
 
 // A 140-degree wrist deformation pinched the Shoot mesh. Guard against its
 // return in the compressed runtime asset, including interpolated half-frames.

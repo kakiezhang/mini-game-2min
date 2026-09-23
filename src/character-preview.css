@@ -162,10 +162,15 @@ h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
 .transition-actions .secondary-button { margin-left: 0; }
 .hold-button { flex: 1; min-height: 44px; padding: 9px 12px; border: 1px solid #6ee7c7; border-radius: 9px; background: #183d34; color: #a6f7df; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; font-size: 12px; }
 .hold-button[aria-pressed="true"], #auto-transition[aria-pressed="true"] { background: #6ee7c7; color: #06110e; }
-.blend-readout { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 12px; margin-top: 14px; }
+.shoot-button { min-height: 44px; padding: 9px 12px; border: 1px solid #ffb454; border-radius: 9px; color: #ffd7a2; background: #3d2b17; cursor: pointer; font-size: 12px; }
+.shoot-button:active { color: #201103; background: #ffb454; }
+.blend-readout { display: grid; grid-template-columns: .8fr .8fr 1fr 2fr; gap: 12px; margin-top: 14px; }
 .blend-readout output { font-size: 12px; font-variant-numeric: tabular-nums; }
-.weight-bar { height: 3px; margin-top: 6px; background: #719bdd; border-radius: 2px; overflow: hidden; }
-.weight-bar span { display: block; height: 100%; width: 100%; background: #6ee7c7; }
+.weight-bar { display: flex; height: 3px; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+.weight-bar span { display: block; height: 100%; transition: width .04s linear; }
+#idle-weight-bar { width: 100%; background: #6ee7c7; }
+#walk-weight-bar { width: 0; background: #719bdd; }
+#shoot-weight-bar { width: 0; background: #ffb454; }
 .transition-hint { margin: 10px 0 0; color: #8f9aa4; font-size: 11px; line-height: 1.6; }
 
 .play-button {
@@ -264,8 +269,9 @@ input[type="range"] {
   #mode-hint { display: none; }
   .transition-actions { gap: 6px; flex-wrap: wrap; }
   .hold-button { flex-basis: 100%; }
-  .transition-actions .secondary-button { flex: 1; min-height: 36px; }
-  .blend-readout { grid-template-columns: .7fr 1fr 1.6fr; gap: 6px; }
+  .transition-actions .secondary-button, .shoot-button { flex: 1; min-height: 36px; }
+  .blend-readout { grid-template-columns: .7fr .7fr 1fr; gap: 6px; }
+  .blend-readout > div:last-child { grid-column: 1 / -1; }
   .blend-readout output { font-size: 11px; }
   .info-panel { width: calc(100vw - 36px); padding: 10px 13px; }
   .stats-grid { grid-template-columns: repeat(4, 1fr); margin-top: 8px; }

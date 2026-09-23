@@ -9,6 +9,7 @@ export const CHARACTER_MODELS = {
     clips: {
       idle: /idle/i,
       walk: /walk/i,
+      shoot: /shoot/i,
     },
   },
   bug: {

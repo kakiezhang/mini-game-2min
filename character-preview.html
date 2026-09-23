@@ -44,7 +44,7 @@
       <section class="transport" aria-label="动画控制">
         <div class="review-modes" role="group" aria-label="验收模式">
           <button id="single-mode" type="button" aria-pressed="true">单动作预览</button>
-          <button id="transition-mode" type="button" aria-pressed="false" disabled>Idle ↔ Walk 切换测试</button>
+          <button id="transition-mode" type="button" aria-pressed="false" disabled>Idle / Walk / Shoot 切换测试</button>
           <span id="mode-hint">查看单段动作与循环接缝</span>
         </div>
         <div id="single-controls" class="transport-main">
@@ -60,15 +60,17 @@
         <div id="transition-controls" hidden>
           <div class="transition-actions">
             <button id="hold-move" class="hold-button" type="button" aria-pressed="false">按住移动 · 松开站立</button>
-            <button id="auto-transition" class="secondary-button" type="button" aria-pressed="false">自动往返 · 每 2 秒</button>
+            <button id="shoot-action" class="shoot-button" type="button">播放 Shoot · F</button>
+            <button id="auto-transition" class="secondary-button" type="button" aria-pressed="false">自动完整流程</button>
             <button id="transition-pause" class="secondary-button" type="button">暂停测试</button>
           </div>
           <div class="blend-readout">
-            <div><span class="field-label">目标动作</span><output id="transition-state">Idle</output></div>
+            <div><span class="field-label">当前动作</span><output id="transition-state">Idle</output></div>
+            <div><span class="field-label">移动意图</span><output id="locomotion-state">Idle</output></div>
             <div><span class="field-label">过渡</span><output id="transition-status">稳定 · 0.12 s</output></div>
-            <div><span class="field-label">实际混合权重</span><output id="blend-weights">Idle 100% · Walk 0%</output><div class="weight-bar"><span id="idle-weight-bar"></span></div></div>
+            <div><span class="field-label">实际混合权重</span><output id="blend-weights">Idle 100% · Walk 0% · Shoot 0%</output><div class="weight-bar"><span id="idle-weight-bar"></span><span id="walk-weight-bar"></span><span id="shoot-weight-bar"></span></div></div>
           </div>
-          <p class="transition-hint">按住空格或上方按钮模拟移动；自动往返按动画时间计时，慢速会同步放慢过渡。仅测试姿势，不移动模型位置。</p>
+          <p class="transition-hint">按住空格模拟移动，按 F 播放一次 Shoot；射击过程中可改变移动意图，结束后应回到当时的 Idle 或 Walk。自动流程依次测试站立射击和移动射击。仅测试姿势，不移动模型位置。</p>
         </div>
         <div class="transport-options">
           <label class="speed-control">

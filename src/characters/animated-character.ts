@@ -2,7 +2,11 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { CharacterAnimationController, type CharacterAnimationState } from "./animation-controller.js";
+import {
+  CharacterAnimationController,
+  type CharacterAnimationState,
+  type CharacterOneShotState,
+} from "./animation-controller.js";
 
 export type { CharacterAnimationState } from "./animation-controller.js";
 
@@ -23,6 +27,7 @@ export interface CharacterVisual {
   readonly root: THREE.Group;
   setMovement(directionX: number, directionZ: number): void;
   setState(state: CharacterAnimationState): void;
+  playOneShot(state: CharacterOneShotState): boolean;
   update(delta: number): void;
   dispose(): void;
 }
@@ -53,6 +58,8 @@ export class StaticCharacterVisual implements CharacterVisual {
   setMovement(_directionX: number, _directionZ: number) {}
 
   setState(_state: CharacterAnimationState) {}
+
+  playOneShot(_state: CharacterOneShotState) { return false; }
 
   update(_delta: number) {}
 
@@ -111,6 +118,10 @@ export class AnimatedCharacter implements CharacterVisual {
 
   setState(state: CharacterAnimationState) {
     this.animation.setState(state);
+  }
+
+  playOneShot(state: CharacterOneShotState) {
+    return this.animation.playOneShot(state);
   }
 
   setMovement(directionX: number, directionZ: number) {
