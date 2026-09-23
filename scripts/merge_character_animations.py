@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         metavar="NAME=FRAMES",
-        help="Blend the final frames back to the first pose for a clean loop",
+        help="Blend the final frames to the opening pose and motion for a clean loop",
     )
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(values)
@@ -126,6 +126,48 @@ def is_arm_or_hand_bone(name: str) -> bool:
     return any(part in name for part in ("Shoulder", "Arm", "ForeArm", "Hand"))
 
 
+def close_loop(samples: dict, blend_count: int) -> None:
+    """Keep the clip length/body; join both pose and velocity at its seam.
+
+    Blending to a static first pose brakes to a stop before each repeat. Instead
+    extrapolate the opening frame's motion backwards and fade into that path.
+    Quintic easing leaves motion at the start of the blend undisturbed, too.
+    """
+    for bone_samples in samples.values():
+        first_location, first_rotation, first_scale = bone_samples[0]
+        next_location, next_rotation, next_scale = bone_samples[1]
+        location_step = next_location - first_location
+        scale_step = next_scale - first_scale
+        rotation_step = first_rotation.conjugated() @ next_rotation
+        if rotation_step.w < 0:
+            rotation_step.negate()
+        # atan2 preserves tiny Idle rotations that acos(w) can round to zero.
+        vector = Vector((rotation_step.x, rotation_step.y, rotation_step.z))
+        angle = 2.0 * math.atan2(vector.length, rotation_step.w)
+        axis = vector.normalized() if vector.length > 1e-12 else Vector((1, 0, 0))
+        last_index = len(bone_samples) - 1
+        for index in range(last_index - blend_count + 1, last_index + 1):
+            remaining = last_index - index
+            t = 1.0 - remaining / blend_count
+            alpha = t * t * t * (t * (6.0 * t - 15.0) + 10.0)
+            location, rotation, scale = bone_samples[index]
+            if remaining == 0:
+                bone_samples[index] = (
+                    first_location.copy(), first_rotation.copy(), first_scale.copy(),
+                )
+                continue
+            target_rotation = first_rotation @ Quaternion(axis, -angle * remaining)
+            bone_samples[index] = (
+                location.lerp(first_location - location_step * remaining, alpha),
+                rotation.slerp(target_rotation, alpha),
+                scale.lerp(first_scale - scale_step * remaining, alpha),
+            )
+        # Stay on the same quaternion hemisphere after modifying the samples.
+        for previous, current in zip(bone_samples, bone_samples[1:]):
+            if previous[1].dot(current[1]) < 0:
+                current[1].negate()
+
+
 def bake_action_onto_armature(
     source_armature: bpy.types.Object,
     target_armature: bpy.types.Object,
@@ -202,19 +244,7 @@ def bake_action_onto_armature(
     sample_count = source_end - source_start + 1
     blend_count = min(loop_blend_frames, max(0, sample_count - 1))
     if blend_count > 0:
-        for target_bone in target_bones:
-            bone_samples = samples[target_bone.name]
-            first_location, first_rotation, first_scale = bone_samples[0]
-            for offset in range(blend_count):
-                index = sample_count - blend_count + offset
-                alpha = (offset + 1) / blend_count
-                alpha = alpha * alpha * (3.0 - 2.0 * alpha)
-                location, rotation, scale = bone_samples[index]
-                bone_samples[index] = (
-                    location.lerp(first_location, alpha),
-                    rotation.slerp(first_rotation, alpha),
-                    scale.lerp(first_scale, alpha),
-                )
+        close_loop(samples, blend_count)
 
     baked_action = bpy.data.actions.new(action_name)
     baked_action.use_fake_user = True
@@ -244,6 +274,8 @@ def bake_action_onto_armature(
 
     max_matrix_error = 0.0
     max_position_error = 0.0
+    max_unchanged_matrix_error = 0.0
+    endpoint_poses = []
     for index, desired in enumerate(reference_poses):
         bpy.context.scene.frame_set(index)
         bpy.context.view_layer.update()
@@ -254,13 +286,30 @@ def bake_action_onto_armature(
             max_matrix_error = max(max_matrix_error, max(
                 abs(actual[row][col] - expected[row][col]) for row in range(4) for col in range(4)
             ))
+            if index < sample_count - blend_count:
+                max_unchanged_matrix_error = max(max_unchanged_matrix_error, max(
+                    abs(actual[row][col] - expected[row][col])
+                    for row in range(4) for col in range(4)
+                ))
+        if index in (0, sample_count - 1):
+            endpoint_poses.append({bone.name: bone.matrix.copy() for bone in target_bones})
     print("RETARGET_VALIDATION=" + json.dumps({
         "clip": action_name, "source_frames": [source_start, source_end],
         "output_frames": [0, sample_count - 1], "bones": len(target_bones),
         "max_matrix_error": max_matrix_error, "max_position_error": max_position_error,
+        "loop_blend_frames": blend_count,
+        "max_unchanged_matrix_error": max_unchanged_matrix_error,
     }))
-    if smooth_radius == 0 and blend_count == 0 and max_matrix_error > 0.0001:
+    if smooth_radius == 0 and max_unchanged_matrix_error > 0.0001:
         raise SystemExit("Baked animation does not reproduce source bone poses")
+    if blend_count > 0:
+        seam_error = max(
+            abs(endpoint_poses[0][bone.name][row][col] - endpoint_poses[-1][bone.name][row][col])
+            for bone in target_bones for row in range(4) for col in range(4)
+        )
+        print("LOOP_VALIDATION=" + json.dumps({"clip": action_name, "max_matrix_error": seam_error}))
+        if seam_error > 0.0001:
+            raise SystemExit("Loop endpoints do not match")
 
     return baked_action
 
