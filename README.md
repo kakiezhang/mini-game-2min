@@ -48,6 +48,23 @@ http://localhost:6173/character-preview.html
 
 验收台默认加载仓库根目录下的 `ksman_v3_walk_1k_meshopt.glb`，支持旋转、缩放、播放暂停、逐帧拖动、播放速度、循环和骨骼显示；也可以直接拖入其他 `.glb` 文件进行对比。
 
+主角的 Idle 使用原始 Mixamo 动画第 2–5 秒（30 FPS 下第 61–151 帧），重新计时为 0–3 秒。合并时根据同一帧的父子骨骼矩阵转换到基础骨架，逐帧核对姿态，不清零非根骨骼位移、不强制缩放，也不对原动作额外平滑。
+
+重新生成主角动画（原始 FBX 保留在本地）：
+
+```bash
+/Applications/Blender.app/Contents/MacOS/Blender -b --python-exit-code 1 \
+  --python scripts/merge_character_animations.py -- \
+  ksman_v3_walk.fbx ksman_v3_walk.glb \
+  --clip Idle=ksman_v3_idle.fbx --clip-range Idle=61:151 --force
+npx --yes @gltf-transform/cli@4.5.0 optimize \
+  ksman_v3_walk.glb ksman_v3_walk_1k_meshopt.glb \
+  --compress meshopt --meshopt-level medium --resample false \
+  --texture-compress webp --texture-size 1024
+```
+
+这里保留动画采样精度，避免压缩步骤再次引入手指旋转误差；`Walk` 和 `Idle` 共用同一个模型与骨架。
+
 也可直接使用 npm：
 
 ```bash

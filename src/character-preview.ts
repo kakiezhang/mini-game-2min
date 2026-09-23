@@ -4,7 +4,7 @@ import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import "./character-preview.css";
 
-const DEFAULT_MODEL_URL = "/ksman_v3_walk_1k_meshopt.glb";
+const DEFAULT_MODEL_URL = `/ksman_v3_walk_1k_meshopt.glb?preview=${Date.now()}`;
 const DEFAULT_MODEL_NAME = "ksman_v3_walk_1k_meshopt.glb";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#character-preview-canvas")!;
@@ -131,6 +131,8 @@ const chooseAnimation = (index: number) => {
   activeAction = mixer.clipAction(clip);
   activeAction.reset().play();
   applyLoopMode();
+  mixer.update(0);
+  activeGltf.scene.updateMatrixWorld(true);
   isPlaying = true;
   timeline.max = String(Math.max(clip.duration, 0.001));
   timeline.value = "0";
@@ -223,7 +225,6 @@ const installModel = (gltf: GLTF, name: string) => {
     object.receiveShadow = true;
   });
   modelStage.add(gltf.scene);
-  frameModel(gltf.scene);
   updateStats(gltf.scene);
 
   skeletonHelper = new THREE.SkeletonHelper(gltf.scene);
@@ -252,6 +253,8 @@ const installModel = (gltf: GLTF, name: string) => {
     timeOutput.value = "0.00 / 0.00 s";
     setStatus("模型已加载，但没有动作", "error");
   }
+  // Mixamo bind-pose axes may differ from the evaluated animation pose.
+  frameModel(gltf.scene);
 };
 
 const loadModel = async (url: string, name: string, revokeAfterLoad = false) => {

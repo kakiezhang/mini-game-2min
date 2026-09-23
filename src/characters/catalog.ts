@@ -7,6 +7,7 @@ export const CHARACTER_MODELS = {
     height: 118,
     idlePose: 0.5,
     clips: {
+      idle: /idle/i,
       walk: /walk/i,
     },
   },
