@@ -3,6 +3,7 @@ dist/
 .performance-logs/
 .navigation-test-dist/
 .ai-test-dist/
+.animation-test-dist/
 .DS_Store
 *.log
 *.png

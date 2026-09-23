@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".animation-test-dist",
+    "rootDir": "."
+  },
+  "include": ["src/three-meshopt.d.ts", "src/characters/animation-controller.ts", "src/characters/animated-character.ts", "tests/character-animation.test.ts"]
+}

@@ -88,4 +88,12 @@ const performanceLogCollector = (): Plugin => {
 
 export default defineConfig({
   plugins: [performanceLogCollector()],
+  build: {
+    rollupOptions: {
+      input: {
+        game: path.resolve(import.meta.dirname, "index.html"),
+        characterPreview: path.resolve(import.meta.dirname, "character-preview.html"),
+      },
+    },
+  },
 });

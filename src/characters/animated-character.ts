@@ -2,8 +2,9 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { CharacterAnimationController, type CharacterAnimationState } from "./animation-controller.js";
 
-export type CharacterAnimationState = "idle" | "walk" | "attack" | "hit" | "death";
+export type { CharacterAnimationState } from "./animation-controller.js";
 
 export type CharacterModelConfig = {
   url: string;
@@ -63,12 +64,6 @@ type CharacterAsset = {
   animations: THREE.AnimationClip[];
 };
 
-function matchesClip(clip: THREE.AnimationClip, matcher: string | RegExp) {
-  if (typeof matcher === "string") return clip.name.toLowerCase() === matcher.toLowerCase();
-  matcher.lastIndex = 0;
-  return matcher.test(clip.name);
-}
-
 function cloneInstanceMaterial(material: THREE.Material) {
   const instanceMaterial = material.clone();
   instanceMaterial.userData = { ...material.userData };
@@ -101,80 +96,33 @@ function prepareModel(model: THREE.Group, maxAnisotropy: number) {
 export class AnimatedCharacter implements CharacterVisual {
   readonly root: THREE.Group;
 
-  private readonly mixer: THREE.AnimationMixer;
-  private readonly actions = new Map<CharacterAnimationState, THREE.AnimationAction>();
-  private activeAction?: THREE.AnimationAction;
-  private currentState?: CharacterAnimationState;
-  private readonly idlePose: number;
+  private readonly animation: CharacterAnimationController;
 
   constructor(asset: CharacterAsset, config: CharacterModelConfig, options: CharacterInstanceOptions = {}) {
     this.root = cloneSkeleton(asset.scene) as THREE.Group;
     this.root.rotation.y = config.facingOffset ?? 0;
     prepareModel(this.root, options.maxAnisotropy ?? 1);
 
-    this.mixer = new THREE.AnimationMixer(this.root);
-    this.idlePose = THREE.MathUtils.clamp(config.idlePose ?? 0.5, 0, 1);
-    for (const state of Object.keys(config.clips) as CharacterAnimationState[]) {
-      const matcher = config.clips[state];
-      if (!matcher) continue;
-      const clip = asset.animations.find((candidate) => matchesClip(candidate, matcher));
-      if (!clip) continue;
-      const action = this.mixer.clipAction(clip);
-      action.timeScale = config.animationSpeed ?? 1;
-      this.actions.set(state, action);
-    }
-
-    if (this.actions.size === 0) {
-      throw new Error(`Character model contains none of the configured animation clips: ${config.url}`);
-    }
-
     // Apply an animation pose before measuring. Some Mixamo exports have a
     // different bind-pose up axis that resolves correctly only after evaluation.
-    this.setState("idle");
-    this.mixer.update(0);
+    this.animation = new CharacterAnimationController(this.root, asset.animations, config);
     this.normalizeModel(config.height);
   }
 
   setState(state: CharacterAnimationState) {
-    if (state === this.currentState) return;
-
-    const action = this.actions.get(state);
-    if (!action && state === "idle") {
-      const walkAction = this.actions.get("walk");
-      if (!walkAction) return;
-      walkAction.play();
-      walkAction.paused = true;
-      walkAction.time = walkAction.getClip().duration * this.idlePose;
-      this.activeAction = walkAction;
-      this.currentState = state;
-      this.mixer.update(0);
-      return;
-    }
-    if (!action) return;
-
-    if (action === this.activeAction) {
-      action.paused = false;
-    } else {
-      this.activeAction?.fadeOut(0.12);
-      action.reset().fadeIn(0.12).play();
-      action.paused = false;
-      this.activeAction = action;
-    }
-    this.currentState = state;
+    this.animation.setState(state);
   }
 
   setMovement(directionX: number, directionZ: number) {
-    const moving = Math.hypot(directionX, directionZ) > 0.08;
-    this.setState(moving ? "walk" : "idle");
+    this.animation.setMovement(directionX, directionZ);
   }
 
   update(delta: number) {
-    if (!this.activeAction?.paused) this.mixer.update(delta);
+    this.animation.update(delta);
   }
 
   dispose() {
-    this.mixer.stopAllAction();
-    this.mixer.uncacheRoot(this.root);
+    this.animation.dispose();
   }
 
   private normalizeModel(targetHeight: number) {
