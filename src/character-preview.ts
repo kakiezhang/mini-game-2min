@@ -273,22 +273,28 @@ const setReviewMode = (mode: "single" | "transition") => {
   loopToggle.disabled = mode === "transition";
   isScrubbing = false;
   if (mode === "transition" && activeGltf) {
+    const armedLocomotion = ["RifleIdle", "RifleWalk"].every(name =>
+      activeGltf!.animations.some(clip => clip.name.toLowerCase() === name.toLowerCase()));
     const spine = activeGltf.scene.getObjectByName("mixamorigSpine");
     const shootUpperBodyOnly = spine instanceof THREE.Bone
       && spine.parent?.name === "mixamorigHips"
       && activeGltf.animations.some(clip => clip.name.toLowerCase() === "shoot");
     const shootClip = activeGltf.animations.find(clip => clip.name.toLowerCase() === "shoot");
     const shootPulseEndSeconds = shootUpperBodyOnly
-      && fileName.textContent === DEFAULT_MODEL_NAME && (shootClip?.duration ?? 0) > 0.31 ? 0.3 : undefined;
+      && armedLocomotion && (shootClip?.duration ?? 0) > 0.31 ? 0.3 : undefined;
     transitionController = new CharacterAnimationController(activeGltf.scene, activeGltf.animations, {
-      clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i },
+      clips: {
+        idle: armedLocomotion ? /^RifleIdle$/i : /^Idle$/i,
+        walk: armedLocomotion ? /^RifleWalk$/i : /^Walk$/i,
+        shoot: /^Shoot$/i,
+      },
       shootUpperBodyOnly,
       shootPulseEndSeconds,
     });
     transitionPaused = false;
     transitionPause.textContent = "暂停测试";
     modeHint.textContent = shootPulseEndSeconds
-      ? "与游戏共用控制器 · 单发 Shoot 取原片前 0.30 秒、只覆盖上半身 · 腿部继续 Idle／Walk"
+      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk" : "Idle／Walk"} · 单发 Shoot 取原片前 0.30 秒、只覆盖上半身`
       : shootUpperBodyOnly
         ? "与游戏共用控制器 · Shoot 只覆盖上半身，腿部继续 Idle／Walk"
         : "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
@@ -356,7 +362,9 @@ const installModel = (gltf: GLTF, name: string) => {
   });
   modelStage.add(gltf.scene);
   updateStats(gltf.scene);
-  if (name === DEFAULT_MODEL_NAME) heldWeapon = attachPlayerSmg(gltf.scene);
+  if (name.startsWith("ksman_v3_") && gltf.scene.getObjectByName("mixamorigRightHand") instanceof THREE.Bone) {
+    heldWeapon = attachPlayerSmg(gltf.scene);
+  }
 
   skeletonHelper = new THREE.SkeletonHelper(gltf.scene);
   skeletonHelper.visible = skeletonToggle.checked;
@@ -372,12 +380,15 @@ const installModel = (gltf: GLTF, name: string) => {
   });
 
   const hasAnimation = gltf.animations.length > 0;
-  transitionModeButton.disabled = !["idle", "walk"].every(name => gltf.animations.some(clip => clip.name.toLowerCase() === name));
+  transitionModeButton.disabled = ![["idle", "walk"], ["rifleidle", "riflewalk"]].some(names =>
+    names.every(name => gltf.animations.some(clip => clip.name.toLowerCase() === name)));
   animationSelect.disabled = !hasAnimation;
   playToggle.disabled = !hasAnimation;
   timeline.disabled = !hasAnimation;
   if (hasAnimation) {
-    chooseAnimation(0);
+    const defaultClipIndex = gltf.animations.findIndex(clip => clip.name.toLowerCase() === "rifleidle");
+    animationSelect.value = String(Math.max(defaultClipIndex, 0));
+    chooseAnimation(Math.max(defaultClipIndex, 0));
     setStatus("模型与动作已就绪", "ready");
   } else {
     statAnimation.textContent = "无动画";
@@ -411,7 +422,8 @@ const loadModel = async (url: string, name: string, revokeAfterLoad = false) => 
   } finally {
     if (version === loadVersion) {
       playToggle.disabled = !activeClip;
-      transitionModeButton.disabled = !activeGltf || !["idle", "walk"].every(name => activeGltf!.animations.some(clip => clip.name.toLowerCase() === name));
+      transitionModeButton.disabled = !activeGltf || ![["idle", "walk"], ["rifleidle", "riflewalk"]].some(names =>
+        names.every(name => activeGltf!.animations.some(clip => clip.name.toLowerCase() === name)));
       holdMove.disabled = transitionModeButton.disabled;
       const hasShoot = Boolean(activeGltf?.animations.some(clip => clip.name.toLowerCase() === "shoot"));
       shootAction.disabled = transitionModeButton.disabled || !hasShoot;

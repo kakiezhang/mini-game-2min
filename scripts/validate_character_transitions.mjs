@@ -24,6 +24,10 @@ async function loadAsset(path) {
   return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(JSON.stringify(json), '');
 }
 const asset = await loadAsset(new URL('../ksman_v3_walk_1k_meshopt.glb', import.meta.url));
+for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk']) {
+  assert.ok(asset.animations.some(clip => clip.name === name), `Missing ${name} clip`);
+}
+const armedClips = { idle: /^RifleIdle$/i, walk: /^RifleWalk$/i, shoot: /^Shoot$/i };
 const root = clone(asset.scene);
 const controller = new CharacterAnimationController(root, asset.animations, { clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } });
 const bones = [];
@@ -85,11 +89,11 @@ assert.equal(controller.getSnapshot().actions.find(action => action.state === 'i
 // Shooting must leave the actual player's hips and legs on the Walk/Idle pose.
 const layeredRoot = clone(asset.scene), locomotionRoot = clone(asset.scene);
 const layered = new CharacterAnimationController(layeredRoot, asset.animations, {
-  clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i }, shootUpperBodyOnly: true,
+  clips: armedClips, shootUpperBodyOnly: true,
   shootPulseEndSeconds: 0.3,
 });
 const locomotion = new CharacterAnimationController(locomotionRoot, asset.animations, {
-  clips: { idle: /^idle$/i, walk: /^walk$/i },
+  clips: { idle: armedClips.idle, walk: armedClips.walk },
 });
 const upperBoneNames = new Set();
 layeredRoot.getObjectByName('mixamorigSpine').traverse(object => {
@@ -187,7 +191,7 @@ for (const name of ['mixamorigLeftArm', 'mixamorigRightArm']) {
 layered.dispose(); locomotion.dispose();
 
 // Exercise the game wrapper as well, including normalization and skin cloning.
-const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, heldWeapon: 'smg', clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } };
+const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, heldWeapon: 'smg', clips: armedClips };
 const player = new AnimatedCharacter(asset, config);
 const other = new AnimatedCharacter(asset, config);
 const rightHand = player.root.getObjectByName('mixamorigRightHand');
@@ -297,3 +301,43 @@ if (baseline) {
 shootMixer.stopAllAction(); shootMixer.uncacheRoot(shootRoot);
 baselineMixer?.stopAllAction();
 console.log(JSON.stringify({ test: 'Shoot wrist', samples: 81, maxWristAngle, baselineChecked: Boolean(baseline), maxJointPositionError, maxOtherBoneMatrixError }));
+
+// New armed locomotion must also keep the left wrist intact at subframes.
+for (const name of ['RifleIdle', 'RifleWalk']) {
+  const clip = asset.animations.find(candidate => candidate.name === name);
+  const rig = clone(asset.scene);
+  let armedSkin;
+  rig.traverse(object => { if (object.isSkinnedMesh) armedSkin = object; });
+  const forearmIndex = armedSkin.skeleton.bones.findIndex(bone => bone.name.endsWith('LeftForeArm'));
+  const wristIndex = armedSkin.skeleton.bones.findIndex(bone => bone.name.endsWith('LeftHand'));
+  const mixer = new THREE.AnimationMixer(rig);
+  const action = mixer.clipAction(clip);
+  action.setLoop(THREE.LoopOnce, 1).play();
+  action.clampWhenFinished = true;
+  const capturePose = time => {
+    mixer.setTime(time); rig.updateMatrixWorld(true);
+    return armedSkin.skeleton.bones.map(bone => ({
+      position: bone.getWorldPosition(new THREE.Vector3()),
+      rotation: bone.getWorldQuaternion(new THREE.Quaternion()),
+    }));
+  };
+  const first = capturePose(0), last = capturePose(clip.duration);
+  let maxSeamPosition = 0, maxSeamAngle = 0;
+  first.forEach((pose, index) => {
+    maxSeamPosition = Math.max(maxSeamPosition, pose.position.distanceTo(last[index].position));
+    maxSeamAngle = Math.max(maxSeamAngle, THREE.MathUtils.radToDeg(pose.rotation.angleTo(last[index].rotation)));
+  });
+  assert.ok(maxSeamPosition < 0.02 && maxSeamAngle < 3,
+    `${name} loop seam is discontinuous: ${maxSeamPosition} units, ${maxSeamAngle}°`);
+  let maxAngle = 0;
+  for (let frame = 0; frame <= 120; frame++) {
+    mixer.setTime(clip.duration * frame / 120); rig.updateMatrixWorld(true);
+    const rotation = index => new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(
+      armedSkin.skeleton.bones[index].matrixWorld.clone().multiply(armedSkin.skeleton.boneInverses[index]),
+    )).normalize();
+    maxAngle = Math.max(maxAngle, THREE.MathUtils.radToDeg(rotation(forearmIndex).angleTo(rotation(wristIndex))));
+  }
+  assert.ok(maxAngle < 90, `${name} left wrist twist is excessive: ${maxAngle}`);
+  mixer.stopAllAction(); mixer.uncacheRoot(rig);
+  console.log(JSON.stringify({ test: `${name} wrist and loop`, samples: 121, maxAngle, maxSeamPosition, maxSeamAngle }));
+}

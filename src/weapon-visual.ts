@@ -58,7 +58,9 @@ export function attachPlayerSmg(root: THREE.Object3D): HeldWeaponVisual {
   addBox("stock", [0.090, 0.060, 0.125], [0.053, 0.040, -0.087], grip);
   addBox("receiver", [0.130, 0.083, 0.205], [0.102, 0.057, 0.095], body);
   addBox("handguard", [0.130, 0.067, 0.125], [0.108, 0.054, 0.248], grip);
-  addBox("supportLedge", [0.040, 0.038, 0.150], [0.170, 0.010, 0.150], grip);
+  // The rifle Idle/Walk left palm rests slightly farther back and lower than
+  // the Shoot palm. Keep one continuous handguard surface under all three.
+  addBox("supportLedge", [0.060, 0.060, 0.180], [0.180, 0.005, 0.120], grip);
   addBox("pistolGrip", [0.052, 0.120, 0.061], [0.001, -0.072, 0.009], grip, -0.16);
   addBox("triggerGuard", [0.070, 0.018, 0.073], [0.040, -0.038, 0.079], steel);
   addBox("magazine", [0.050, 0.142, 0.067], [0.101, -0.074, 0.167], steel, 0.13);

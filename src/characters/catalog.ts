@@ -10,9 +10,9 @@ export const CHARACTER_MODELS = {
     shootPulseEndSeconds: 0.3,
     heldWeapon: "smg",
     clips: {
-      idle: /idle/i,
-      walk: /walk/i,
-      shoot: /shoot/i,
+      idle: /^RifleIdle$/i,
+      walk: /^RifleWalk$/i,
+      shoot: /^Shoot$/i,
     },
   },
   bug: {
