@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { attachPlayerSmg, type HeldWeaponVisual } from "../weapon-visual.js";
 import {
   CharacterAnimationController,
   type CharacterActionPlaybackOptions,
@@ -19,6 +20,7 @@ export type CharacterModelConfig = {
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
+  heldWeapon?: "smg";
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
 };
 
@@ -28,6 +30,7 @@ export type CharacterInstanceOptions = {
 
 export interface CharacterVisual {
   readonly root: THREE.Group;
+  readonly muzzleSocket?: THREE.Object3D;
   setMovement(directionX: number, directionZ: number): void;
   setState(state: CharacterAnimationState): void;
   playOneShot(state: CharacterOneShotState, options?: CharacterActionPlaybackOptions): boolean;
@@ -108,8 +111,10 @@ function prepareModel(model: THREE.Group, maxAnisotropy: number) {
 
 export class AnimatedCharacter implements CharacterVisual {
   readonly root: THREE.Group;
+  readonly muzzleSocket?: THREE.Object3D;
 
   private readonly animation: CharacterAnimationController;
+  private readonly heldWeapon?: HeldWeaponVisual;
 
   constructor(asset: CharacterAsset, config: CharacterModelConfig, options: CharacterInstanceOptions = {}) {
     this.root = cloneSkeleton(asset.scene) as THREE.Group;
@@ -120,6 +125,10 @@ export class AnimatedCharacter implements CharacterVisual {
     // different bind-pose up axis that resolves correctly only after evaluation.
     this.animation = new CharacterAnimationController(this.root, asset.animations, config);
     this.normalizeModel(config.height);
+    if (config.heldWeapon === "smg") {
+      this.heldWeapon = attachPlayerSmg(this.root);
+      this.muzzleSocket = this.heldWeapon.muzzleSocket;
+    }
   }
 
   setState(state: CharacterAnimationState) {
@@ -140,6 +149,10 @@ export class AnimatedCharacter implements CharacterVisual {
 
   update(delta: number) {
     this.animation.update(delta);
+    if (this.heldWeapon) {
+      const shootWeight = this.animation.getSnapshot().actions.find(action => action.state === "shoot")?.weight ?? 0;
+      this.heldWeapon.updatePose(shootWeight);
+    }
   }
 
   dispose() {

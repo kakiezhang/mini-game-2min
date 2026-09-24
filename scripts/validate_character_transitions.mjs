@@ -187,11 +187,55 @@ for (const name of ['mixamorigLeftArm', 'mixamorigRightArm']) {
 layered.dispose(); locomotion.dispose();
 
 // Exercise the game wrapper as well, including normalization and skin cloning.
-const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } };
+const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, heldWeapon: 'smg', clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } };
 const player = new AnimatedCharacter(asset, config);
 const other = new AnimatedCharacter(asset, config);
+const rightHand = player.root.getObjectByName('mixamorigRightHand');
+const weapon = player.root.getObjectByName('heldSmg');
+assert.ok(rightHand?.isBone && weapon && player.muzzleSocket, 'Player gun or muzzle socket is missing');
+assert.ok(rightHand.getObjectByName('weaponSocket')?.getObjectByName('heldSmg') === weapon,
+  'The gun must follow the right-hand bone');
+assert.notEqual(player.muzzleSocket, other.muzzleSocket, 'Muzzle sockets are shared between characters');
+const muzzleForward = () => new THREE.Vector3(0, 0, 1).applyQuaternion(
+  player.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+const neutralDirection = muzzleForward();
+assert.ok(neutralDirection.z > 0.75 && neutralDirection.y < -0.25,
+  `Idle gun should be lowered forward, not at the feet: ${neutralDirection.toArray()}`);
+const muzzleBeforeShoot = player.muzzleSocket.getWorldPosition(new THREE.Vector3());
+assert.ok(player.playOneShot('shoot'));
+player.update(0.1);
+const muzzleDuringShoot = player.muzzleSocket.getWorldPosition(new THREE.Vector3());
+assert.ok(muzzleDuringShoot.distanceTo(muzzleBeforeShoot) > 1,
+  'The muzzle socket does not move with the Shoot pose');
+const aimedDirection = muzzleForward();
+assert.ok(aimedDirection.z > 0.999 && Math.abs(aimedDirection.x) < 1e-3 && Math.abs(aimedDirection.y) < 1e-3,
+  `Shoot gun barrel is not level with the aim line: ${aimedDirection.toArray()}`);
+for (const yaw of [Math.PI / 2, Math.PI, -Math.PI / 2]) {
+  player.root.rotation.y = yaw;
+  player.update(0);
+  const direction = muzzleForward();
+  assert.ok(Math.abs(direction.x - Math.sin(yaw)) < 1e-3
+    && Math.abs(direction.y) < 1e-3
+    && Math.abs(direction.z - Math.cos(yaw)) < 1e-3,
+  `Shoot barrel diverges when facing ${yaw}: ${direction.toArray()}`);
+}
+player.root.rotation.y = 0;
+player.update(0);
+const leftWrist = player.root.getObjectByName('mixamorigLeftHand');
+const leftMiddleBase = player.root.getObjectByName('mixamorigLeftHandMiddle1');
+const supportSocket = weapon.getObjectByName('supportHandSocket');
+assert.ok(leftWrist?.isBone && leftMiddleBase?.isBone && supportSocket,
+  'The left-hand support attachment is missing');
+for (const delta of [0, 0.1, 0.1]) {
+  player.update(delta);
+  const palm = leftWrist.getWorldPosition(new THREE.Vector3())
+    .lerp(leftMiddleBase.getWorldPosition(new THREE.Vector3()), 0.5);
+  const support = supportSocket.getWorldPosition(new THREE.Vector3());
+  assert.ok(palm.distanceTo(support) < 5,
+    `Left palm floats away from the gun during Shoot: ${palm.distanceTo(support)}`);
+}
 const bounds = new THREE.Box3().setFromObject(player.root);
-assert.ok(Math.abs(bounds.getSize(new THREE.Vector3()).y - 118) < 1e-4);
+assert.ok(bounds.getSize(new THREE.Vector3()).y >= 118 - 1e-4);
 assert.ok(Math.abs(bounds.min.y) < 1e-4);
 const otherBone = other.root.getObjectByName(bones[0].name);
 other.root.updateMatrixWorld(true);

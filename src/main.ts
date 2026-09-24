@@ -143,6 +143,7 @@ class OfficeEscapeGame {
   private player = new THREE.Group();
   private playerLight?: THREE.PointLight;
   private playerVisual?: CharacterVisual;
+  private readonly muzzleWorldPosition = new THREE.Vector3();
   private pendingShotAim?: { x: number; z: number };
   private input?: InputController;
   private crosshair?: THREE.Group;
@@ -827,7 +828,6 @@ class OfficeEscapeGame {
     this.player = new THREE.Group();
 
     const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
-    muzzleAccent.position.set(16, 44, 83);
     const selectionRing = new THREE.Mesh(
       new THREE.RingGeometry(25, 32, 32),
       new THREE.MeshBasicMaterial({ color: COLORS.playerAccent, transparent: true, opacity: 0.38, depthWrite: false }),
@@ -835,7 +835,7 @@ class OfficeEscapeGame {
     selectionRing.rotation.x = -Math.PI / 2;
     selectionRing.position.y = 3;
 
-    this.player.add(muzzleAccent, selectionRing);
+    this.player.add(selectionRing);
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
     this.scene.add(this.player);
 
@@ -847,6 +847,12 @@ class OfficeEscapeGame {
       maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
     });
     this.player.add(this.playerVisual.root);
+    if (this.playerVisual.muzzleSocket) {
+      this.playerVisual.muzzleSocket.add(muzzleAccent);
+    } else {
+      muzzleAccent.position.set(16, 44, 83);
+      this.player.add(muzzleAccent);
+    }
   }
 
   private createCrosshair() {
@@ -973,8 +979,9 @@ class OfficeEscapeGame {
     const enemiesStartedAt = this.performanceMonitor.startPhase();
     this.updateEnemies(delta);
     this.performanceMonitor.finishPhase("enemies", enemiesStartedAt);
-    this.updateWeapon(input);
+    const shotAim = this.updateWeapon(input);
     this.updatePlayerAnimation(delta, input);
+    if (shotAim) this.fireWeapon(shotAim.x, shotAim.z);
     this.updateAmmoPickups(delta);
     this.updateAccessCard();
     this.updateEvacuation(delta);
@@ -1004,7 +1011,11 @@ class OfficeEscapeGame {
     this.playerState.x = nextPosition.x;
     this.playerState.z = nextPosition.z;
     this.player.position.set(this.playerState.x, 0, this.playerState.z);
-    this.player.rotation.y = Math.atan2(input.aimX, input.aimZ);
+    // Keep the facing direction committed during the short Shoot windup so
+    // a direction change before the firing frame cannot turn the gun away
+    // from the shot that is already queued.
+    const facingAim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
+    this.player.rotation.y = Math.atan2(facingAim.x, facingAim.z);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
     this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
   }
@@ -1322,6 +1333,7 @@ class OfficeEscapeGame {
 
   private updateWeapon(input: InputState) {
     const update = this.weapon.update(this.elapsed, input.fireHeld, input.reloadPressed);
+    let shotAim: { x: number; z: number } | undefined;
     if (update.reloadStarted) {
       this.pendingShotAim = undefined;
       this.playerVisual?.stopOneShot("shoot");
@@ -1331,9 +1343,8 @@ class OfficeEscapeGame {
       this.playerVisual?.playOneShot("shoot");
     }
     if (update.fired) {
-      const aim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
+      shotAim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
       this.pendingShotAim = undefined;
-      this.fireWeapon(aim.x, aim.z);
     }
     if (update.reloadStarted && this.elapsed >= this.nextWeaponHintAt) {
       this.nextWeaponHintAt = this.elapsed + 0.8;
@@ -1344,6 +1355,7 @@ class OfficeEscapeGame {
       this.showHint("没子弹了，去找弹药箱");
     }
     this.removeDeadEnemies();
+    return shotAim;
   }
 
   private updateAmmoPickups(delta: number) {
@@ -1499,17 +1511,28 @@ class OfficeEscapeGame {
       : obstacleDistance < request.range
         ? { x: endX, z: endZ, color: 0xd8d4c8 }
         : undefined;
-    this.createBulletVisual(request.originX, request.originZ, endX, endZ, impact);
-    this.createMuzzleFlash(request.originX, request.originZ);
+    const visualOrigin = this.playerVisual?.muzzleSocket
+      ? this.playerVisual.muzzleSocket.getWorldPosition(this.muzzleWorldPosition)
+      : this.muzzleWorldPosition.set(request.originX, 40, request.originZ);
+    const forwardDistance = (endX - visualOrigin.x) * request.directionX
+      + (endZ - visualOrigin.z) * request.directionZ;
+    if (forwardDistance > 1) {
+      this.createBulletVisual(
+        visualOrigin, request.directionX, request.directionZ, forwardDistance, impact,
+      );
+    } else if (impact) {
+      this.createImpactEffect(impact.x, impact.z, impact.color);
+    }
+    this.createMuzzleFlash(visualOrigin, request.directionX, request.directionZ);
     this.cameraKick = Math.min(7, this.cameraKick + 2.2);
     return trace.hits.length;
   }
 
   private createBulletVisual(
-    originX: number,
-    originZ: number,
-    endX: number,
-    endZ: number,
+    origin: THREE.Vector3,
+    directionX: number,
+    directionZ: number,
+    distance: number,
     impact?: BulletVisual["impact"],
   ) {
     if (this.bulletVisuals.length >= BULLET_VISUAL.maxActive) {
@@ -1517,8 +1540,7 @@ class OfficeEscapeGame {
       if (oldest) this.disposeObject(oldest.group);
     }
 
-    const direction = new THREE.Vector3(endX - originX, 0, endZ - originZ);
-    const distance = direction.length();
+    const direction = new THREE.Vector3(directionX, 0, directionZ);
     if (distance < 0.001) {
       if (impact) this.createImpactEffect(impact.x, impact.z, impact.color);
       return;
@@ -1544,9 +1566,9 @@ class OfficeEscapeGame {
     group.add(glow, core, light);
     group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
     group.position.set(
-      originX + direction.x * (length / 2),
-      39,
-      originZ + direction.z * (length / 2),
+      origin.x + direction.x * (length / 2),
+      origin.y,
+      origin.z + direction.z * (length / 2),
     );
     this.scene.add(group);
     this.bulletVisuals.push({
@@ -1571,7 +1593,7 @@ class OfficeEscapeGame {
     if (completed.length > 0) this.bulletVisuals = this.bulletVisuals.filter((bullet) => !completed.includes(bullet));
   }
 
-  private createMuzzleFlash(x: number, z: number) {
+  private createMuzzleFlash(origin: THREE.Vector3, directionX: number, directionZ: number) {
     const flash = new THREE.Group();
     const core = new THREE.Mesh(
       new THREE.SphereGeometry(8, 8, 6),
@@ -1589,8 +1611,8 @@ class OfficeEscapeGame {
     spark.position.z = 18;
     const light = createDynamicPointLight("muzzle", 0xffbd55, 1.35, 165, 1.8);
     flash.add(bloom, core, spark, light);
-    flash.position.set(x, 40, z);
-    flash.rotation.y = this.player.rotation.y;
+    flash.position.copy(origin);
+    flash.rotation.y = Math.atan2(directionX, directionZ);
     this.scene.add(flash);
     this.shotEffects.push({ object: flash, life: 0.075, maxLife: 0.075 });
   }

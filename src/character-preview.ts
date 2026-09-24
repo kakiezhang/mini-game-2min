@@ -3,6 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { CharacterAnimationController } from "./characters/animation-controller.js";
+import { attachPlayerSmg, type HeldWeaponVisual } from "./weapon-visual.js";
 import "./character-preview.css";
 
 const DEFAULT_MODEL_URL = `${new URL("../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href}?preview=${Date.now()}`;
@@ -105,6 +106,7 @@ scene.add(grid);
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const clock = new THREE.Clock();
 let activeGltf: GLTF | undefined;
+let heldWeapon: HeldWeaponVisual | undefined;
 let mixer: THREE.AnimationMixer | undefined;
 let activeAction: THREE.AnimationAction | undefined;
 let activeClip: THREE.AnimationClip | undefined;
@@ -249,6 +251,7 @@ const clearCurrentModel = () => {
     disposeObject(activeGltf.scene);
   }
   activeGltf = undefined;
+  heldWeapon = undefined;
   mixer = undefined;
   activeAction = undefined;
   activeClip = undefined;
@@ -353,6 +356,7 @@ const installModel = (gltf: GLTF, name: string) => {
   });
   modelStage.add(gltf.scene);
   updateStats(gltf.scene);
+  if (name === DEFAULT_MODEL_NAME) heldWeapon = attachPlayerSmg(gltf.scene);
 
   skeletonHelper = new THREE.SkeletonHelper(gltf.scene);
   skeletonHelper.visible = skeletonToggle.checked;
@@ -581,6 +585,12 @@ renderer.setAnimationLoop(() => {
       isPlaying = false;
       updatePlayButton();
     }
+  }
+  if (heldWeapon) {
+    const shootWeight = reviewMode === "transition"
+      ? transitionController?.getSnapshot().actions.find(action => action.state === "shoot")?.weight ?? 0
+      : activeClip?.name.toLowerCase() === "shoot" ? 1 : 0;
+    heldWeapon.updatePose(shootWeight);
   }
   controls.update();
   updateTimeDisplay();
