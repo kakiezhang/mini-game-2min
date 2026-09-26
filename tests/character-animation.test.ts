@@ -96,6 +96,26 @@ near(controller.getSnapshot().actions.find(action => action.state === "idle")!.w
 assert(!controller.stopOneShot("shoot"), "Stopping an inactive Shoot has no effect");
 assert(!controller.playOneShot("reload"), "Missing one-shot clip reports failure");
 
+const reloadRoot = new THREE.Group();
+const reloadBone = new THREE.Bone();
+reloadBone.name = "reloadBone";
+reloadRoot.add(reloadBone);
+const reloadController = new CharacterAnimationController(reloadRoot, [
+  new THREE.AnimationClip("Idle", 1, [new THREE.NumberKeyframeTrack("reloadBone.position[x]", [0, 1], [0, 0])]),
+  new THREE.AnimationClip("Walk", 1, [new THREE.NumberKeyframeTrack("reloadBone.position[x]", [0, 1], [1, 2])]),
+  new THREE.AnimationClip("Reload", 3.3, [new THREE.NumberKeyframeTrack("reloadBone.position[x]", [0, 3.3], [2, 4])]),
+], { clips: { idle: /^Idle$/, walk: /^Walk$/, reload: /^Reload$/ } });
+assert(reloadController.playOneShot("reload", { durationSeconds: 1.3 }), "Reload starts with a gameplay duration");
+reloadController.update(0.65);
+const reloadAction = reloadController.getSnapshot().actions.find(action => action.state === "reload")!;
+assert(reloadAction.time > 1.64 && reloadAction.time < 1.66, "Reload source clip is retimed to gameplay");
+reloadController.setMovement(1, 0);
+assert(reloadController.getSnapshot().state === "reload", "Walking does not cancel Reload");
+reloadController.update(0.65);
+assert(reloadController.getSnapshot().state === "walk", "Reload returns to current locomotion at gameplay end");
+reloadController.update(0.12);
+near(reloadController.getSnapshot().actions.find(action => action.state === "walk")!.weight, 1, "Reload fully releases the upper pose");
+
 const legacy = makeRig(true);
 near(legacy.bone.position.x, 15, "Walk-only model freezes at configured Idle pose");
 legacy.controller.update(1);
@@ -109,5 +129,5 @@ const independent = makeRig();
 controller.setMovement(1, 0);
 controller.update(0.1);
 near(independent.bone.position.x, 2, "Instances remain independent");
-controller.dispose(); legacy.controller.dispose(); independent.controller.dispose();
+controller.dispose(); legacy.controller.dispose(); independent.controller.dispose(); reloadController.dispose();
 console.log("Character animation tests passed: initialization, blending, reversals, one-shots, fire cadence, reload interruption, fallback, independence.");

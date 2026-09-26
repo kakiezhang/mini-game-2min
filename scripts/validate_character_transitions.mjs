@@ -24,10 +24,10 @@ async function loadAsset(path) {
   return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(JSON.stringify(json), '');
 }
 const asset = await loadAsset(new URL('../ksman_v3_walk_1k_meshopt.glb', import.meta.url));
-for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk']) {
+for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk', 'Reload']) {
   assert.ok(asset.animations.some(clip => clip.name === name), `Missing ${name} clip`);
 }
-const armedClips = { idle: /^RifleIdle$/i, walk: /^RifleWalk$/i, shoot: /^Shoot$/i };
+const armedClips = { idle: /^RifleIdle$/i, walk: /^RifleWalk$/i, shoot: /^Shoot$/i, reload: /^Reload$/i };
 const root = clone(asset.scene);
 const controller = new CharacterAnimationController(root, asset.animations, { clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } });
 const bones = [];
@@ -190,10 +190,110 @@ for (const name of ['mixamorigLeftArm', 'mixamorigRightArm']) {
 }
 layered.dispose(); locomotion.dispose();
 
+// The long Mixamo Reload must finish in the weapon's 1.3-second window while
+// the legs continue their armed Walk, then return to that same Walk phase.
+const reloadLayerRoot = clone(asset.scene), reloadLegRoot = clone(asset.scene);
+const reloadLayer = new CharacterAnimationController(reloadLayerRoot, asset.animations, {
+  clips: armedClips, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3,
+});
+const reloadLegs = new CharacterAnimationController(reloadLegRoot, asset.animations, {
+  clips: { idle: armedClips.idle, walk: armedClips.walk },
+});
+reloadLayer.setMovement(1, 0); reloadLegs.setMovement(1, 0);
+reloadLayer.update(0.2); reloadLegs.update(0.2);
+assert.ok(reloadLayer.playOneShot('reload', { durationSeconds: 1.3 }));
+reloadLayer.update(0.65); reloadLegs.update(0.65);
+const halfwayReload = reloadLayer.getSnapshot().actions.find(action => action.state === 'reload');
+assert.ok(halfwayReload.time > 1.64 && halfwayReload.time < 1.66,
+  `Reload did not follow gameplay duration: ${halfwayReload.time}`);
+reloadLayerRoot.updateMatrixWorld(true); reloadLegRoot.updateMatrixWorld(true);
+let reloadLegError = 0;
+for (const name of lowerBoneNames) {
+  const actual = reloadLayerRoot.getObjectByName(name).matrixWorld.elements;
+  const expected = reloadLegRoot.getObjectByName(name).matrixWorld.elements;
+  for (let index = 0; index < 16; index++) reloadLegError = Math.max(reloadLegError, Math.abs(actual[index] - expected[index]));
+}
+assert.ok(reloadLegError < 1e-6, `Reload overrides the Walk legs: ${reloadLegError}`);
+reloadLayer.update(0.65); reloadLegs.update(0.65);
+assert.equal(reloadLayer.getSnapshot().state, 'walk', 'Reload did not return to the moving pose');
+reloadLayer.update(0.12); reloadLegs.update(0.12);
+assert.ok(reloadLayer.getSnapshot().actions.find(action => action.state === 'reload').weight < 1e-6);
+reloadLayer.dispose(); reloadLegs.dispose();
+
 // Exercise the game wrapper as well, including normalization and skin cloning.
 const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3, heldWeapon: 'smg', clips: armedClips };
 const player = new AnimatedCharacter(asset, config);
 const other = new AnimatedCharacter(asset, config);
+const reloadPlayer = new AnimatedCharacter(asset, config);
+const fixedMagazine = reloadPlayer.root.getObjectByName('magazine');
+const movingMagazine = reloadPlayer.root.getObjectByName('movingMagazine');
+const reloadGun = reloadPlayer.root.getObjectByName('heldSmg');
+const reloadMuzzle = reloadPlayer.muzzleSocket;
+const reloadHand = reloadPlayer.root.getObjectByName('mixamorigRightHand');
+const indexBase = reloadPlayer.root.getObjectByName('mixamorigRightHandIndex1');
+const indexNext = reloadPlayer.root.getObjectByName('mixamorigRightHandIndex2');
+const fingerDirection = () => indexNext.getWorldPosition(new THREE.Vector3())
+  .sub(indexBase.getWorldPosition(new THREE.Vector3())).normalize();
+const reloadMuzzleDirection = () => new THREE.Vector3(0, 0, 1).applyQuaternion(
+  reloadMuzzle.getWorldQuaternion(new THREE.Quaternion()));
+const expectedReloadDirection = finger => finger.clone().setY(finger.y * 0.25).normalize();
+assert.ok(fixedMagazine && movingMagazine && fixedMagazine.visible && !movingMagazine.visible);
+assert.ok(reloadPlayer.playOneShot('reload', { durationSeconds: 1.3 }));
+reloadPlayer.update(1 / 60);
+reloadPlayer.update(0.25 - 1 / 60);
+assert.ok(!fixedMagazine.visible && movingMagazine.visible, 'Magazine does not leave the gun during Reload');
+const earlyReloadDirection = reloadMuzzleDirection();
+const earlyFingerDirection = fingerDirection();
+assert.ok(earlyReloadDirection.angleTo(expectedReloadDirection(earlyFingerDirection)) < 1e-4,
+  'Reload barrel does not follow the right index heading');
+assert.ok(earlyReloadDirection.y > -0.05,
+  'Reload barrel still points below the right hand');
+assert.ok(reloadGun.getWorldPosition(new THREE.Vector3()).distanceTo(
+  reloadHand.getWorldPosition(new THREE.Vector3())) < 1e-4,
+  'Reload gun grip no longer follows the right palm');
+reloadPlayer.update(0.7);
+assert.ok(fixedMagazine.visible && !movingMagazine.visible, 'Magazine does not return before Reload ends');
+const laterReloadDirection = reloadMuzzleDirection();
+const laterFingerDirection = fingerDirection();
+assert.ok(earlyFingerDirection.angleTo(laterFingerDirection) > 0.2,
+  'Reload source finger did not change direction at the sampled poses');
+assert.ok(earlyReloadDirection.angleTo(laterReloadDirection) > 0.15,
+  `Reload gun muzzle is still locked to a fixed direction: ${earlyReloadDirection.toArray()} -> ${laterReloadDirection.toArray()}, angle ${earlyReloadDirection.angleTo(laterReloadDirection)}`);
+assert.ok(laterReloadDirection.angleTo(expectedReloadDirection(laterFingerDirection)) < 1e-4,
+  'Reload barrel drifts away from the right index heading later in the animation');
+assert.ok(laterReloadDirection.y > -0.05,
+  'Reload barrel points below the right hand later in the animation');
+assert.ok(reloadGun.getWorldPosition(new THREE.Vector3()).distanceTo(
+  reloadHand.getWorldPosition(new THREE.Vector3())) < 1e-4,
+  'Reload gun grip detached from the right palm later in the animation');
+reloadPlayer.update(0.35);
+assert.ok(fixedMagazine.visible && !movingMagazine.visible, 'Reload leaves an extra visible magazine');
+const reloadSweep = new AnimatedCharacter(asset, config);
+assert.ok(reloadSweep.playOneShot('reload', { durationSeconds: 1.3 }));
+let minReloadMuzzleY = Infinity, maxReloadMuzzleY = -Infinity, maxReloadHeadingError = 0;
+const sweepGun = reloadSweep.root.getObjectByName('heldSmg');
+const sweepHand = reloadSweep.root.getObjectByName('mixamorigRightHand');
+const sweepIndexBase = reloadSweep.root.getObjectByName('mixamorigRightHandIndex1');
+const sweepIndexNext = reloadSweep.root.getObjectByName('mixamorigRightHandIndex2');
+for (let frame = 0; frame < 78; frame++) {
+  reloadSweep.update(1 / 60);
+  const muzzle = new THREE.Vector3(0, 0, 1).applyQuaternion(
+    reloadSweep.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+  if (frame >= 5 && frame < 77) {
+    const finger = sweepIndexNext.getWorldPosition(new THREE.Vector3()).sub(
+      sweepIndexBase.getWorldPosition(new THREE.Vector3())).normalize();
+    minReloadMuzzleY = Math.min(minReloadMuzzleY, muzzle.y);
+    maxReloadMuzzleY = Math.max(maxReloadMuzzleY, muzzle.y);
+    maxReloadHeadingError = Math.max(maxReloadHeadingError, muzzle.angleTo(expectedReloadDirection(finger)));
+  }
+  assert.ok(sweepGun.getWorldPosition(new THREE.Vector3()).distanceTo(
+    sweepHand.getWorldPosition(new THREE.Vector3())) < 1e-4,
+    'Reload gun grip detached from the right palm during playback');
+}
+assert.ok(maxReloadHeadingError < 1e-4, `Reload heading drifts during playback: ${maxReloadHeadingError}`);
+assert.ok(minReloadMuzzleY > -0.1, `Reload muzzle still points down: ${minReloadMuzzleY}`);
+assert.ok(maxReloadMuzzleY < 0.35, `Reload muzzle lifts too steeply: ${maxReloadMuzzleY}`);
+reloadSweep.dispose();
 const rightHand = player.root.getObjectByName('mixamorigRightHand');
 const weapon = player.root.getObjectByName('heldSmg');
 assert.ok(rightHand?.isBone && weapon && player.muzzleSocket, 'Player gun or muzzle socket is missing');
@@ -247,7 +347,7 @@ const otherPose = otherBone.matrixWorld.clone();
 for (let frame = 0; frame < 180; frame++) { player.setMovement(frame % 10 < 5 ? 1 : 0, 0); player.update(1 / 60); }
 other.root.updateMatrixWorld(true);
 assert.ok(otherBone.matrixWorld.equals(otherPose), 'Game instances share mutable bone state');
-player.dispose(); other.dispose(); controller.dispose();
+player.dispose(); other.dispose(); reloadPlayer.dispose(); controller.dispose();
 console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, zeroTimeShootError, lowerBodyPoseError, returnedArmPoseError, rapidShotPoseError, rapidShotCount, singlePulseDuration, height: 118, grounded: true, independent: true, shootFallback: true, shootStarts, maxShootTime }));
 
 // A 140-degree wrist deformation pinched the Shoot mesh. Guard against its
@@ -291,7 +391,7 @@ for (let frame = 0; frame <= 80; frame++) {
 if (baseline) {
   assert.ok(maxJointPositionError < 0.0001, `Joint position changed: ${maxJointPositionError}`);
   assert.ok(maxOtherBoneMatrixError < 0.001, `Other bone pose changed: ${maxOtherBoneMatrixError}`);
-  for (const name of ['Idle', 'Walk']) {
+  for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk']) {
     const current = asset.animations.find(clip => clip.name === name).toJSON();
     const previous = baseline.animations.find(clip => clip.name === name).toJSON();
     delete current.uuid; delete previous.uuid;
@@ -303,7 +403,7 @@ baselineMixer?.stopAllAction();
 console.log(JSON.stringify({ test: 'Shoot wrist', samples: 81, maxWristAngle, baselineChecked: Boolean(baseline), maxJointPositionError, maxOtherBoneMatrixError }));
 
 // New armed locomotion must also keep the left wrist intact at subframes.
-for (const name of ['RifleIdle', 'RifleWalk']) {
+for (const name of ['RifleIdle', 'RifleWalk', 'Reload']) {
   const clip = asset.animations.find(candidate => candidate.name === name);
   const rig = clone(asset.scene);
   let armedSkin;

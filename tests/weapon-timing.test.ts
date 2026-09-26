@@ -21,6 +21,14 @@ assert(weapon.update(0.3, true, false).fired, "The second bullet preserves 0.2-s
 assert(weapon.update(0.4, true, false).shotStarted, "A third attack can begin");
 const reload = weapon.update(0.45, false, true);
 assert(reload.reloadStarted && !reload.fired, "Reload cancels an unfired attack");
+assert(reload.reloadDurationSeconds === 1.3, "Reload animation receives the gameplay duration");
 assert(!weapon.update(0.6, false, false).fired, "Canceled attack cannot fire during reload");
 assert(weapon.getSnapshot(0.6).magazineAmmo === 18, "Canceled attack does not consume ammo");
+assert(weapon.update(1.75, false, false).reloadCompleted, "Reload completion emits a visual stop event");
+const autoReloadWeapon = new WeaponSystem({ ...DEFAULT_WEAPON, magazineSize: 1 });
+assert(autoReloadWeapon.update(0, true, false).shotStarted, "Single-round gun starts a shot");
+assert(autoReloadWeapon.update(0.1, true, false).fired, "Single-round gun empties its magazine");
+const autoReload = autoReloadWeapon.update(0.2, true, false);
+assert(autoReload.reloadStarted && autoReload.reloadDurationSeconds === 1.3,
+  "Empty-magazine automatic reload also provides its animation duration");
 console.log("Weapon timing tests passed: windup, tap commitment, 5 Hz cadence, ammo timing, reload cancellation.");

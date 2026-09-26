@@ -13,6 +13,7 @@ export const CHARACTER_MODELS = {
       idle: /^RifleIdle$/i,
       walk: /^RifleWalk$/i,
       shoot: /^Shoot$/i,
+      reload: /^Reload$/i,
     },
   },
   bug: {

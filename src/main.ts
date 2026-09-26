@@ -1337,7 +1337,9 @@ class OfficeEscapeGame {
     if (update.reloadStarted) {
       this.pendingShotAim = undefined;
       this.playerVisual?.stopOneShot("shoot");
+      this.playerVisual?.playOneShot("reload", { durationSeconds: update.reloadDurationSeconds });
     }
+    if (update.reloadCompleted) this.playerVisual?.stopOneShot("reload");
     if (update.shotStarted) {
       this.pendingShotAim = { x: input.aimX, z: input.aimZ };
       this.playerVisual?.playOneShot("shoot");

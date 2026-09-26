@@ -12,6 +12,7 @@ export type CharacterAnimationConfig = {
 };
 export type CharacterActionPlaybackOptions = {
   restartIfActive?: boolean;
+  durationSeconds?: number;
 };
 
 export const CHARACTER_TRANSITION_SECONDS = 0.12;
@@ -58,14 +59,15 @@ export class CharacterAnimationController {
   private elapsed = CHARACTER_TRANSITION_SECONDS;
   private transitionDuration = CHARACTER_TRANSITION_SECONDS;
   private readonly idlePose: number;
+  private readonly animationSpeed: number;
 
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], config: CharacterAnimationConfig) {
     if (config.shootUpperBodyOnly) {
       if (!config.clips.idle || !config.clips.walk || !config.clips.shoot) {
         throw new Error("Upper-body Shoot requires Idle, Walk, and Shoot clips");
       }
-      if (Object.keys(config.clips).some(state => !["idle", "walk", "shoot"].includes(state))) {
-        throw new Error("Upper-body Shoot currently supports only Idle, Walk, and Shoot");
+      if (Object.keys(config.clips).some(state => !["idle", "walk", "shoot", "reload"].includes(state))) {
+        throw new Error("Upper-body actions currently support Idle, Walk, Shoot, and Reload");
       }
       const maskedClips = upperBodyClips(root, clips);
       this.locomotionLayer = new CharacterAnimationController(root, clips, {
@@ -77,6 +79,7 @@ export class CharacterAnimationController {
     }
     this.mixer = new THREE.AnimationMixer(root);
     this.idlePose = THREE.MathUtils.clamp(config.idlePose ?? 0.5, 0, 1);
+    this.animationSpeed = config.animationSpeed ?? 1;
     for (const state of Object.keys(config.clips) as CharacterAnimationState[]) {
       const matcher = config.clips[state];
       const clip = clips.find(candidate => {
@@ -97,7 +100,7 @@ export class CharacterAnimationController {
         ? THREE.AnimationUtils.subclip(clip, clip.name, 0, Math.round(config.shootPulseEndSeconds * 30) + 1, 30)
         : clip;
       const action = this.mixer.clipAction(actionClip);
-      action.timeScale = config.animationSpeed ?? 1;
+      action.timeScale = this.animationSpeed;
       action.setEffectiveWeight(0);
       this.actions.set(state, action);
       this.allActions.push(action);
@@ -105,7 +108,7 @@ export class CharacterAnimationController {
         // Separate clip identity lets consecutive shots blend instead of
         // snapping one still-weighted action back to its first frame.
         this.alternateShootAction = this.mixer.clipAction(actionClip.clone());
-        this.alternateShootAction.timeScale = config.animationSpeed ?? 1;
+        this.alternateShootAction.timeScale = this.animationSpeed;
         this.alternateShootAction.setEffectiveWeight(0);
         this.allActions.push(this.alternateShootAction);
       }
@@ -140,6 +143,9 @@ export class CharacterAnimationController {
   playOneShot(state: CharacterOneShotState, options: CharacterActionPlaybackOptions = {}) {
     const primaryAction = this.actions.get(state);
     if (!primaryAction) return false;
+    if (options.durationSeconds !== undefined && (
+      !Number.isFinite(options.durationSeconds) || options.durationSeconds <= 0
+    )) throw new Error("One-shot duration must be positive and finite");
     // Automatic fire may arrive while the previous Shoot is still fading out.
     // Resetting that still-weighted clip to frame zero would snap the pose.
     if (options.restartIfActive === false && (
@@ -153,6 +159,8 @@ export class CharacterAnimationController {
 
     action.enabled = true;
     action.paused = false;
+    action.timeScale = options.durationSeconds === undefined
+      ? this.animationSpeed : action.getClip().duration / options.durationSeconds;
     action.setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
     action.reset().play();

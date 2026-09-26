@@ -6,6 +6,7 @@ export type WeaponUpdate = {
   dryFire: boolean;
   reloadStarted: boolean;
   reloadCompleted: boolean;
+  reloadDurationSeconds?: number;
 };
 
 export type WeaponSnapshot = {
@@ -47,7 +48,7 @@ export class WeaponSystem {
   }
 
   update(elapsed: number, fireHeld: boolean, reloadPressed: boolean): WeaponUpdate {
-    const result = { shotStarted: false, fired: false, dryFire: false, reloadStarted: false, reloadCompleted: false };
+    const result: WeaponUpdate = { shotStarted: false, fired: false, dryFire: false, reloadStarted: false, reloadCompleted: false };
 
     if (this.isReloading && elapsed >= this.reloadEndsAt) {
       this.finishReload(elapsed);
@@ -57,6 +58,7 @@ export class WeaponSystem {
     if (reloadPressed && this.startReload(elapsed)) {
       this.pendingShotAt = undefined;
       result.reloadStarted = true;
+      result.reloadDurationSeconds = this.reloadEndsAt - this.reloadStartedAt;
     }
     if (this.pendingShotAt !== undefined) {
       if (elapsed + 1e-9 < this.pendingShotAt) return result;
@@ -68,7 +70,10 @@ export class WeaponSystem {
     if (!fireHeld || this.isReloading || elapsed < this.nextShotAt) return result;
 
     if (this.magazineAmmo <= 0) {
-      if (this.reserveAmmo > 0) result.reloadStarted = this.startReload(elapsed);
+      if (this.reserveAmmo > 0) {
+        result.reloadStarted = this.startReload(elapsed);
+        if (result.reloadStarted) result.reloadDurationSeconds = this.reloadEndsAt - this.reloadStartedAt;
+      }
       else if (elapsed >= this.nextDryFireAt) {
         this.nextDryFireAt = elapsed + 0.45;
         result.dryFire = true;

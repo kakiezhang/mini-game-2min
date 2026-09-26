@@ -44,7 +44,7 @@
       <section class="transport" aria-label="动画控制">
         <div class="review-modes" role="group" aria-label="验收模式">
           <button id="single-mode" type="button" aria-pressed="true">单动作预览</button>
-          <button id="transition-mode" type="button" aria-pressed="false" disabled>Idle / Walk / Shoot 切换测试</button>
+          <button id="transition-mode" type="button" aria-pressed="false" disabled>Idle / Walk / Shoot / Reload 切换测试</button>
           <span id="mode-hint">查看单段动作与循环接缝</span>
         </div>
         <div id="single-controls" class="transport-main">
@@ -61,6 +61,7 @@
           <div class="transition-actions">
             <button id="hold-move" class="hold-button" type="button" aria-pressed="false">按住移动 · 松开站立</button>
             <button id="shoot-action" class="shoot-button" type="button">播放 Shoot · F</button>
+            <button id="reload-action" class="secondary-button" type="button">播放 Reload · R</button>
             <button id="auto-transition" class="secondary-button" type="button" aria-pressed="false">自动完整流程</button>
             <button id="transition-pause" class="secondary-button" type="button">暂停测试</button>
           </div>
@@ -68,9 +69,9 @@
             <div><span class="field-label">当前动作</span><output id="transition-state">Idle</output></div>
             <div><span class="field-label">移动意图</span><output id="locomotion-state">Idle</output></div>
             <div><span class="field-label">过渡</span><output id="transition-status">稳定 · 0.12 s</output></div>
-            <div><span class="field-label">实际混合权重</span><output id="blend-weights">Idle 100% · Walk 0% · Shoot 0%</output><div class="weight-bar"><span id="idle-weight-bar"></span><span id="walk-weight-bar"></span><span id="shoot-weight-bar"></span></div></div>
+            <div><span class="field-label">实际混合权重</span><output id="blend-weights">Idle 100% · Walk 0% · Shoot 0% · Reload 0%</output><div class="weight-bar"><span id="idle-weight-bar"></span><span id="walk-weight-bar"></span><span id="shoot-weight-bar"></span><span id="reload-weight-bar"></span></div></div>
           </div>
-          <p class="transition-hint">按住空格模拟移动，按 F 播放一次游戏使用的单发 Shoot；快速连续按 F 可检查逐发后坐力。Shoot 只覆盖上半身，腿部继续 Idle 或 Walk。射击过程中可改变移动意图，结束后应回到当时的状态。自动流程依次测试站立射击和移动射击；本页不移动模型位置。</p>
+          <p class="transition-hint">按住空格模拟移动，按 F 播放单发 Shoot，按 R 播放约 1.3 秒的游戏换弹动作。Shoot／Reload 只覆盖上半身，腿部继续 Idle 或 Walk。换弹会中断射击，动作结束后回到当前移动状态；本页不移动模型位置。</p>
         </div>
         <div class="transport-options">
           <label class="speed-control">

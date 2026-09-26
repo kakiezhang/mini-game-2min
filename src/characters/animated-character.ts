@@ -150,8 +150,11 @@ export class AnimatedCharacter implements CharacterVisual {
   update(delta: number) {
     this.animation.update(delta);
     if (this.heldWeapon) {
-      const shootWeight = this.animation.getSnapshot().actions.find(action => action.state === "shoot")?.weight ?? 0;
-      this.heldWeapon.updatePose(shootWeight);
+      const actions = this.animation.getSnapshot().actions;
+      const shootWeight = actions.find(action => action.state === "shoot")?.weight ?? 0;
+      const reload = actions.find(action => action.state === "reload");
+      this.heldWeapon.updatePose(shootWeight, reload?.weight ?? 0,
+        reload ? reload.time / reload.duration : 0);
     }
   }
 
