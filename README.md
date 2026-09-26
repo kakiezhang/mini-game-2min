@@ -48,7 +48,7 @@ http://localhost:6173/character-preview.html
 
 验收台默认加载仓库根目录下的 `ksman_v3_walk_1k_meshopt.glb`，支持旋转、缩放、播放暂停、逐帧拖动、播放速度、循环和骨骼显示；也可以直接拖入其他 `.glb` 文件进行对比。
 
-默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`、`Shoot` 和 `Reload` 六段动作，显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
+默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`、`Shoot` 和 `Reload` 六段动作。原始 `Idle`／`Walk` 是空手动作，预览时隐藏枪；持枪动作及 Shoot／Reload 显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
 
 在「Idle / Walk / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk，松开回 Idle；按 F 播放单发 Shoot，按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
 

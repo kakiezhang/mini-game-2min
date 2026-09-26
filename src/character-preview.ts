@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { CharacterAnimationController } from "./characters/animation-controller.js";
-import { attachPlayerSmg, type HeldWeaponVisual } from "./weapon-visual.js";
+import { attachPlayerSmg, shouldShowPlayerSmg, type HeldWeaponVisual } from "./weapon-visual.js";
 import "./character-preview.css";
 
 const DEFAULT_MODEL_URL = `${new URL("../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href}?preview=${Date.now()}`;
@@ -618,6 +618,9 @@ renderer.setAnimationLoop(() => {
   }
   if (heldWeapon) {
     const actions = reviewMode === "transition" ? transitionController?.getSnapshot().actions : undefined;
+    heldWeapon.weapon.visible = reviewMode === "transition"
+      ? shouldShowPlayerSmg(actions ?? [])
+      : shouldShowPlayerSmg(activeClip ? [{ name: activeClip.name, weight: 1 }] : []);
     const reload = actions?.find(action => action.state === "reload");
     const shootWeight = reviewMode === "transition"
       ? actions?.find(action => action.state === "shoot")?.weight ?? 0

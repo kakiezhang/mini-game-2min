@@ -225,6 +225,27 @@ const config = { url: 'test-player', height: 118, shootUpperBodyOnly: true, shoo
 const player = new AnimatedCharacter(asset, config);
 const other = new AnimatedCharacter(asset, config);
 const reloadPlayer = new AnimatedCharacter(asset, config);
+const unarmedPlayer = new AnimatedCharacter(asset, {
+  ...config,
+  clips: { idle: /^Idle$/i, walk: /^Walk$/i, shoot: /^Shoot$/i, reload: /^Reload$/i },
+});
+const unarmedGun = unarmedPlayer.root.getObjectByName('heldSmg');
+assert.ok(unarmedGun && !unarmedGun.visible, 'Original Idle still shows the gun');
+unarmedPlayer.setMovement(1, 0);
+unarmedPlayer.update(0.2);
+assert.ok(!unarmedGun.visible, 'Original Walk still shows the gun');
+assert.ok(unarmedPlayer.playOneShot('shoot'));
+unarmedPlayer.update(0.1);
+assert.ok(unarmedGun.visible, 'Shoot does not reveal the gun');
+unarmedPlayer.update(0.4);
+unarmedPlayer.update(0.12);
+assert.ok(!unarmedGun.visible, 'Gun remains visible after Shoot returns to original Walk');
+assert.ok(unarmedPlayer.playOneShot('reload', { durationSeconds: 1.3 }));
+unarmedPlayer.update(0.2);
+assert.ok(unarmedGun.visible, 'Reload does not reveal the gun');
+unarmedPlayer.update(1.3);
+unarmedPlayer.update(0.12);
+assert.ok(!unarmedGun.visible, 'Gun remains visible after Reload returns to original Walk');
 const fixedMagazine = reloadPlayer.root.getObjectByName('magazine');
 const movingMagazine = reloadPlayer.root.getObjectByName('movingMagazine');
 const reloadGun = reloadPlayer.root.getObjectByName('heldSmg');
@@ -297,6 +318,12 @@ reloadSweep.dispose();
 const rightHand = player.root.getObjectByName('mixamorigRightHand');
 const weapon = player.root.getObjectByName('heldSmg');
 assert.ok(rightHand?.isBone && weapon && player.muzzleSocket, 'Player gun or muzzle socket is missing');
+assert.ok(weapon.visible, 'Armed RifleIdle incorrectly hides the gun');
+player.setMovement(1, 0);
+player.update(0.2);
+assert.ok(weapon.visible, 'Armed RifleWalk incorrectly hides the gun');
+player.setMovement(0, 0);
+player.update(0.2);
 assert.ok(rightHand.getObjectByName('weaponSocket')?.getObjectByName('heldSmg') === weapon,
   'The gun must follow the right-hand bone');
 assert.notEqual(player.muzzleSocket, other.muzzleSocket, 'Muzzle sockets are shared between characters');
@@ -347,7 +374,7 @@ const otherPose = otherBone.matrixWorld.clone();
 for (let frame = 0; frame < 180; frame++) { player.setMovement(frame % 10 < 5 ? 1 : 0, 0); player.update(1 / 60); }
 other.root.updateMatrixWorld(true);
 assert.ok(otherBone.matrixWorld.equals(otherPose), 'Game instances share mutable bone state');
-player.dispose(); other.dispose(); reloadPlayer.dispose(); controller.dispose();
+player.dispose(); other.dispose(); reloadPlayer.dispose(); unarmedPlayer.dispose(); controller.dispose();
 console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, zeroTimeShootError, lowerBodyPoseError, returnedArmPoseError, rapidShotPoseError, rapidShotCount, singlePulseDuration, height: 118, grounded: true, independent: true, shootFallback: true, shootStarts, maxShootTime }));
 
 // A 140-degree wrist deformation pinched the Shoot mesh. Guard against its

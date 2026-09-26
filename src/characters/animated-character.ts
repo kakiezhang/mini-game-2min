@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
-import { attachPlayerSmg, type HeldWeaponVisual } from "../weapon-visual.js";
+import { attachPlayerSmg, shouldShowPlayerSmg, type HeldWeaponVisual } from "../weapon-visual.js";
 import {
   CharacterAnimationController,
   type CharacterActionPlaybackOptions,
@@ -128,6 +128,7 @@ export class AnimatedCharacter implements CharacterVisual {
     if (config.heldWeapon === "smg") {
       this.heldWeapon = attachPlayerSmg(this.root);
       this.muzzleSocket = this.heldWeapon.muzzleSocket;
+      this.heldWeapon.weapon.visible = shouldShowPlayerSmg(this.animation.getSnapshot().actions);
     }
   }
 
@@ -151,6 +152,7 @@ export class AnimatedCharacter implements CharacterVisual {
     this.animation.update(delta);
     if (this.heldWeapon) {
       const actions = this.animation.getSnapshot().actions;
+      this.heldWeapon.weapon.visible = shouldShowPlayerSmg(actions);
       const shootWeight = actions.find(action => action.state === "shoot")?.weight ?? 0;
       const reload = actions.find(action => action.state === "reload");
       this.heldWeapon.updatePose(shootWeight, reload?.weight ?? 0,

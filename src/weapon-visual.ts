@@ -6,6 +6,10 @@ export type HeldWeaponVisual = {
   updatePose(shootWeight: number, reloadWeight?: number, reloadPhase?: number): void;
 };
 
+export function shouldShowPlayerSmg(actions: readonly { name: string; weight: number }[]) {
+  return actions.some(action => action.weight > 1e-3 && !/^(Idle|Walk)$/i.test(action.name));
+}
+
 const LOWERED_GUN_ROTATION = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.42, 0, 0));
 const AIMED_GUN_ROTATION = new THREE.Quaternion();
 const RELOAD_FINGER_PITCH_FACTOR = 0.25;
