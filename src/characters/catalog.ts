@@ -8,6 +8,7 @@ export const CHARACTER_MODELS = {
     idlePose: 0.5,
     shootUpperBodyOnly: true,
     shootPulseEndSeconds: 0.3,
+    jogFromWalkRun: true,
     runShootFromRun: true,
     heldWeapon: "smg",
     clips: {

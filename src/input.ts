@@ -1,18 +1,21 @@
 import * as THREE from "three";
-import { PLAYER_CONFIG } from "./config";
+import { PLAYER_CONFIG } from "./config.js";
 
 const JOYSTICK_EDGE_OVERFLOW = 10;
 const JOYSTICK_DEADZONE = 0.12;
-const JOYSTICK_WALK_LIMIT = 0.72;
+const JOYSTICK_WALK_LIMIT = 0.5;
+const JOYSTICK_JOG_LIMIT = 0.85;
+const JOYSTICK_JOG_SPEED = 1.3;
 
 export const getJoystickSpeedMultiplier = (strength: number) => {
   if (strength <= JOYSTICK_DEADZONE) return 0;
-  if (strength <= JOYSTICK_WALK_LIMIT) {
-    const progress = (strength - JOYSTICK_DEADZONE) / (JOYSTICK_WALK_LIMIT - JOYSTICK_DEADZONE);
-    return 0.35 + progress * 0.65;
+  if (strength <= JOYSTICK_WALK_LIMIT) return 1;
+  if (strength <= JOYSTICK_JOG_LIMIT) {
+    const progress = (strength - JOYSTICK_WALK_LIMIT) / (JOYSTICK_JOG_LIMIT - JOYSTICK_WALK_LIMIT);
+    return 1 + progress * (JOYSTICK_JOG_SPEED - 1);
   }
-  const runProgress = (Math.min(strength, 1) - JOYSTICK_WALK_LIMIT) / (1 - JOYSTICK_WALK_LIMIT);
-  return 1 + runProgress * (PLAYER_CONFIG.maxRunSpeedMultiplier - 1);
+  const runProgress = (Math.min(strength, 1) - JOYSTICK_JOG_LIMIT) / (1 - JOYSTICK_JOG_LIMIT);
+  return JOYSTICK_JOG_SPEED + runProgress * (PLAYER_CONFIG.maxRunSpeedMultiplier - JOYSTICK_JOG_SPEED);
 };
 
 export type InputState = {
@@ -227,7 +230,9 @@ export class InputController {
     this.joystickX = strength > JOYSTICK_DEADZONE ? Math.cos(angle) : 0;
     this.joystickZ = strength > JOYSTICK_DEADZONE ? Math.sin(angle) : 0;
     this.joystickSpeedMultiplier = getJoystickSpeedMultiplier(strength);
-    this.joystick.base.classList.toggle("is-running", this.joystickSpeedMultiplier > 1.08);
+    this.joystick.base.classList.toggle("is-jogging", this.joystickSpeedMultiplier >= 1.08
+      && this.joystickSpeedMultiplier < 1.35);
+    this.joystick.base.classList.toggle("is-running", this.joystickSpeedMultiplier >= 1.35);
     this.joystick.knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
   }
 
@@ -237,6 +242,7 @@ export class InputController {
     this.joystickX = 0;
     this.joystickZ = 0;
     this.joystickSpeedMultiplier = 0;
+    this.joystick.base.classList.remove("is-jogging");
     this.joystick.base.classList.remove("is-running");
     this.joystick.knob.style.transform = "translate(-50%, -50%)";
   };

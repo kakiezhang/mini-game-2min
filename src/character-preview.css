@@ -170,6 +170,7 @@ h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
 .weight-bar span { display: block; height: 100%; transition: width .04s linear; }
 #idle-weight-bar { width: 100%; background: #6ee7c7; }
 #walk-weight-bar { width: 0; background: #719bdd; }
+#jog-weight-bar { width: 0; background: #7dd3fc; }
 #run-weight-bar { width: 0; background: #facc15; }
 #shoot-weight-bar { width: 0; background: #ffb454; }
 #reload-weight-bar { width: 0; background: #d1a4ff; }

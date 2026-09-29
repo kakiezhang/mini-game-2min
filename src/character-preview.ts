@@ -35,6 +35,7 @@ const singleControls = document.querySelector<HTMLElement>("#single-controls")!;
 const transitionControls = document.querySelector<HTMLElement>("#transition-controls")!;
 const modeHint = document.querySelector<HTMLElement>("#mode-hint")!;
 const holdMove = document.querySelector<HTMLButtonElement>("#hold-move")!;
+const holdJog = document.querySelector<HTMLButtonElement>("#hold-jog")!;
 const holdRun = document.querySelector<HTMLButtonElement>("#hold-run")!;
 const shootAction = document.querySelector<HTMLButtonElement>("#shoot-action")!;
 const reloadAction = document.querySelector<HTMLButtonElement>("#reload-action")!;
@@ -46,6 +47,7 @@ const transitionStatus = document.querySelector<HTMLOutputElement>("#transition-
 const blendWeights = document.querySelector<HTMLOutputElement>("#blend-weights")!;
 const idleWeightBar = document.querySelector<HTMLElement>("#idle-weight-bar")!;
 const walkWeightBar = document.querySelector<HTMLElement>("#walk-weight-bar")!;
+const jogWeightBar = document.querySelector<HTMLElement>("#jog-weight-bar")!;
 const runWeightBar = document.querySelector<HTMLElement>("#run-weight-bar")!;
 const shootWeightBar = document.querySelector<HTMLElement>("#shoot-weight-bar")!;
 const reloadWeightBar = document.querySelector<HTMLElement>("#reload-weight-bar")!;
@@ -126,6 +128,7 @@ let shiftHeld = false;
 let fireHeld = false;
 let fireRepeatRemaining = 0;
 let heldPointer: number | undefined;
+let jogPointer: number | undefined;
 let runPointer: number | undefined;
 let autoEnabled = false;
 let autoTime = 0;
@@ -138,18 +141,20 @@ const updateTransitionDisplay = () => {
   if (!snapshot) return;
   const idle = snapshot.actions.find(action => action.state === "idle");
   const walk = snapshot.actions.find(action => action.state === "walk");
+  const jog = snapshot.actions.find(action => action.state === "jog");
   const run = snapshot.actions.find(action => action.state === "run");
   const shoot = snapshot.actions.find(action => action.state === "shoot");
   const reload = snapshot.actions.find(action => action.state === "reload");
-  const labels = { idle: "Idle", walk: "Walk", run: "Run", shoot: "Shoot", reload: "Reload" } as const;
+  const labels = { idle: "Idle", walk: "Walk", jog: "Jog", run: "Run", shoot: "Shoot", reload: "Reload" } as const;
   transitionState.value = snapshot.state === "shoot" && shoot?.name === "RifleRunShoot"
     ? "RifleRunShoot" : labels[snapshot.state as keyof typeof labels] ?? snapshot.state ?? "—";
   locomotionState.value = labels[snapshot.locomotionState];
   const statusLabel = transitionPaused ? "暂停" : snapshot.oneShotState ? "一次性动作" : snapshot.transitioning ? "混合中" : "稳定";
   transitionStatus.value = `${statusLabel} · ${snapshot.transitionDuration.toFixed(2)} s`;
-  blendWeights.value = `Idle ${Math.round((idle?.weight ?? 0) * 100)}% · Walk ${Math.round((walk?.weight ?? 0) * 100)}% · Run ${Math.round((run?.weight ?? 0) * 100)}% · Shoot ${Math.round((shoot?.weight ?? 0) * 100)}% · Reload ${Math.round((reload?.weight ?? 0) * 100)}%`;
+  blendWeights.value = `Idle ${Math.round((idle?.weight ?? 0) * 100)}% · Walk ${Math.round((walk?.weight ?? 0) * 100)}% · Jog ${Math.round((jog?.weight ?? 0) * 100)}% · Run ${Math.round((run?.weight ?? 0) * 100)}% · Shoot ${Math.round((shoot?.weight ?? 0) * 100)}% · Reload ${Math.round((reload?.weight ?? 0) * 100)}%`;
   idleWeightBar.style.width = `${(idle?.weight ?? 0) * 100}%`;
   walkWeightBar.style.width = `${(walk?.weight ?? 0) * 100}%`;
+  jogWeightBar.style.width = `${(jog?.weight ?? 0) * 100}%`;
   runWeightBar.style.width = `${(run?.weight ?? 0) * 100}%`;
   shootWeightBar.style.width = `${(shoot?.weight ?? 0) * 100}%`;
   reloadWeightBar.style.width = `${(reload?.weight ?? 0) * 100}%`;
@@ -161,15 +166,17 @@ const updateTransitionDisplay = () => {
 const applyTestMovement = () => {
   const held = keyHeld || heldPointer !== undefined;
   const running = runPointer !== undefined || (keyHeld && shiftHeld);
+  const jogging = !running && jogPointer !== undefined;
   const segment = Math.floor(autoTime / 3);
   const phase = autoTime % 3;
-  const moving = held || running || (autoEnabled && segment % 2 === 1);
+  const moving = held || jogging || running || (autoEnabled && segment % 2 === 1);
   holdMove.setAttribute("aria-pressed", String(held));
+  holdJog.setAttribute("aria-pressed", String(jogging));
   holdRun.setAttribute("aria-pressed", String(running));
   autoTransition.setAttribute("aria-pressed", String(autoEnabled));
   autoTransition.textContent = autoEnabled ? "停止自动流程" : "自动完整流程";
   transitionController?.setMovement(moving ? 1 : 0, 0);
-  transitionController?.setMovementSpeedScale(running ? PLAYER_CONFIG.maxRunSpeedMultiplier : 1);
+  transitionController?.setMovementSpeedScale(running ? PLAYER_CONFIG.maxRunSpeedMultiplier : jogging ? 1.2 : 1);
   if (autoEnabled && phase >= 0.75 && autoShootSegment !== segment) {
     autoShootSegment = segment;
     transitionController?.playOneShot("shoot");
@@ -185,6 +192,9 @@ const releaseTestInput = () => {
   const pointer = heldPointer;
   heldPointer = undefined;
   if (pointer !== undefined && holdMove.hasPointerCapture(pointer)) holdMove.releasePointerCapture(pointer);
+  const midPointer = jogPointer;
+  jogPointer = undefined;
+  if (midPointer !== undefined && holdJog.hasPointerCapture(midPointer)) holdJog.releasePointerCapture(midPointer);
   const sprintPointer = runPointer;
   runPointer = undefined;
   if (sprintPointer !== undefined && holdRun.hasPointerCapture(sprintPointer)) holdRun.releasePointerCapture(sprintPointer);
@@ -317,13 +327,15 @@ const setReviewMode = (mode: "single" | "transition") => {
       },
       shootUpperBodyOnly,
       shootPulseEndSeconds,
+      jogFromWalkRun: Boolean(armedLocomotion
+        && activeGltf.animations.some(clip => /^RifleRun$/i.test(clip.name))),
       runShootFromRun: Boolean(shootPulseEndSeconds && armedLocomotion
         && activeGltf.animations.some(clip => /^RifleRun$/i.test(clip.name))),
     });
     transitionPaused = false;
     transitionPause.textContent = "暂停测试";
     modeHint.textContent = shootPulseEndSeconds
-      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk／Run，跑射使用 RifleRunShoot" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
+      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk／Jog／Run，跑射使用 RifleRunShoot" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
       : shootUpperBodyOnly
         ? "与游戏共用控制器 · Shoot 只覆盖上半身，腿部继续 Idle／Walk"
         : "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
@@ -437,6 +449,7 @@ const loadModel = async (url: string, name: string, revokeAfterLoad = false) => 
   playToggle.disabled = true;
   transitionModeButton.disabled = true;
   holdMove.disabled = true;
+  holdJog.disabled = true;
   holdRun.disabled = true;
   autoTransition.disabled = true;
   shootAction.disabled = true;
@@ -455,7 +468,10 @@ const loadModel = async (url: string, name: string, revokeAfterLoad = false) => 
       transitionModeButton.disabled = !activeGltf || ![["idle", "walk"], ["rifleidle", "riflewalk"]].some(names =>
         names.every(name => activeGltf!.animations.some(clip => clip.name.toLowerCase() === name)));
       holdMove.disabled = transitionModeButton.disabled;
-      holdRun.disabled = transitionModeButton.disabled || !activeGltf?.animations.some(clip => clip.name.toLowerCase() === "riflerun");
+      const hasArmedMovement = ["rifleidle", "riflewalk", "riflerun"].every(name =>
+        activeGltf?.animations.some(clip => clip.name.toLowerCase() === name));
+      holdJog.disabled = transitionModeButton.disabled || !hasArmedMovement;
+      holdRun.disabled = transitionModeButton.disabled || !hasArmedMovement;
       const hasShoot = Boolean(activeGltf?.animations.some(clip => clip.name.toLowerCase() === "shoot"));
       const hasReload = Boolean(activeGltf?.animations.some(clip => clip.name.toLowerCase() === "reload"));
       shootAction.disabled = transitionModeButton.disabled || !hasShoot;
@@ -497,6 +513,23 @@ holdMove.addEventListener("pointerup", releasePointer);
 holdMove.addEventListener("pointercancel", releasePointer);
 holdMove.addEventListener("lostpointercapture", releasePointer);
 holdMove.addEventListener("contextmenu", event => event.preventDefault());
+holdJog.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || jogPointer !== undefined || reviewMode !== "transition" || holdJog.disabled) return;
+  event.preventDefault();
+  jogPointer = event.pointerId;
+  holdJog.setPointerCapture(event.pointerId);
+  autoEnabled = false;
+  applyTestMovement();
+});
+const releaseJogPointer = (event: PointerEvent) => {
+  if (jogPointer !== event.pointerId) return;
+  jogPointer = undefined;
+  applyTestMovement();
+};
+holdJog.addEventListener("pointerup", releaseJogPointer);
+holdJog.addEventListener("pointercancel", releaseJogPointer);
+holdJog.addEventListener("lostpointercapture", releaseJogPointer);
+holdJog.addEventListener("contextmenu", event => event.preventDefault());
 holdRun.addEventListener("pointerdown", event => {
   if (event.button !== 0 || runPointer !== undefined || reviewMode !== "transition" || holdRun.disabled) return;
   event.preventDefault();
@@ -687,7 +720,8 @@ renderer.setAnimationLoop(() => {
       ? actions?.find(action => action.state === "shoot")?.weight ?? 0
       : activeClip?.name.toLowerCase() === "shoot" ? 1 : 0;
     const runWeight = reviewMode === "transition"
-      ? actions?.find(action => action.state === "run")?.weight ?? 0
+      ? (actions?.find(action => action.state === "run")?.weight ?? 0)
+        + (actions?.find(action => action.state === "jog")?.weight ?? 0) * 0.25
       : activeClip?.name.toLowerCase() === "riflerun" ? 1 : 0;
     const reloadWeight = reviewMode === "transition" ? reload?.weight ?? 0
       : activeClip?.name.toLowerCase() === "reload" ? 1 : 0;

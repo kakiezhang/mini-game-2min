@@ -20,6 +20,7 @@ export type CharacterModelConfig = {
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
+  jogFromWalkRun?: boolean;
   runShootFromRun?: boolean;
   heldWeapon?: "smg";
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
@@ -162,7 +163,8 @@ export class AnimatedCharacter implements CharacterVisual {
       const actions = this.animation.getSnapshot().actions;
       this.heldWeapon.weapon.visible = shouldShowPlayerSmg(actions);
       const shootWeight = actions.find(action => action.state === "shoot")?.weight ?? 0;
-      const runWeight = actions.find(action => action.state === "run")?.weight ?? 0;
+      const runWeight = (actions.find(action => action.state === "run")?.weight ?? 0)
+        + (actions.find(action => action.state === "jog")?.weight ?? 0) * 0.25;
       const reload = actions.find(action => action.state === "reload");
       this.heldWeapon.updatePose(shootWeight, reload?.weight ?? 0,
         reload ? reload.time / reload.duration : 0, runWeight);

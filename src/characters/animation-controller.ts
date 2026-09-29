@@ -1,7 +1,8 @@
 import * as THREE from "three";
+import { createRifleJogClip } from "./jog-animation.js";
 import { RunShootClipFactory } from "./run-shoot-animation.js";
 
-export type CharacterLocomotionState = "idle" | "walk" | "run";
+export type CharacterLocomotionState = "idle" | "walk" | "jog" | "run";
 export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death";
 export type CharacterAnimationState = CharacterLocomotionState | CharacterOneShotState;
 export type CharacterAnimationConfig = {
@@ -10,6 +11,8 @@ export type CharacterAnimationConfig = {
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
+  walkCycleCount?: number;
+  jogFromWalkRun?: boolean;
   runShootFromRun?: boolean;
 };
 export type CharacterActionPlaybackOptions = {
@@ -21,7 +24,7 @@ export const CHARACTER_TRANSITION_SECONDS = 0.12;
 export const CHARACTER_ACTION_TRANSITION_SECONDS = 0.08;
 
 const isLocomotionState = (state: CharacterAnimationState): state is CharacterLocomotionState => (
-  state === "idle" || state === "walk" || state === "run"
+  state === "idle" || state === "walk" || state === "jog" || state === "run"
 );
 
 const findClip = (clips: THREE.AnimationClip[], matcher: string | RegExp | undefined) => clips.find(candidate => {
@@ -73,20 +76,31 @@ export class CharacterAnimationController {
   private transitionDuration = CHARACTER_TRANSITION_SECONDS;
   private readonly idlePose: number;
   private readonly animationSpeed: number;
+  private readonly walkCycles: number;
 
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], config: CharacterAnimationConfig) {
+    this.walkCycles = config.walkCycleCount ?? (config.jogFromWalkRun ? 3 : 1);
+    if (config.jogFromWalkRun) {
+      const walk = findClip(clips, config.clips.walk);
+      const run = findClip(clips, config.clips.run);
+      if (!walk || !run) throw new Error("RifleJog requires Walk and Run clips");
+      clips = [...clips, createRifleJogClip(walk, run)];
+      config = { ...config, clips: { ...config.clips, jog: /^RifleJog$/i } };
+    }
     if (config.shootUpperBodyOnly) {
       if (!config.clips.idle || !config.clips.walk || !config.clips.shoot) {
         throw new Error("Upper-body Shoot requires Idle, Walk, and Shoot clips");
       }
-      if (Object.keys(config.clips).some(state => !["idle", "walk", "run", "shoot", "reload"].includes(state))) {
-        throw new Error("Upper-body actions currently support Idle, Walk, Run, Shoot, and Reload");
+      if (Object.keys(config.clips).some(state => !["idle", "walk", "jog", "run", "shoot", "reload"].includes(state))) {
+        throw new Error("Upper-body actions currently support Idle, Walk, Jog, Run, Shoot, and Reload");
       }
       const maskedClips = upperBodyClips(root, clips);
       this.locomotionLayer = new CharacterAnimationController(root, clips, {
         ...config,
-        clips: { idle: config.clips.idle, walk: config.clips.walk, run: config.clips.run },
+        clips: { idle: config.clips.idle, walk: config.clips.walk, jog: config.clips.jog, run: config.clips.run },
         shootUpperBodyOnly: false,
+        walkCycleCount: this.walkCycles,
+        jogFromWalkRun: false,
         runShootFromRun: false,
       });
       clips = maskedClips;
@@ -156,7 +170,7 @@ export class CharacterAnimationController {
     if (!Number.isFinite(scale) || scale <= 0) return;
     this.movementSpeedScale = THREE.MathUtils.clamp(scale, 0.2, 2);
     this.locomotionLayer?.setMovementSpeedScale(this.movementSpeedScale);
-    for (const state of ["walk", "run"] as const) {
+    for (const state of ["walk", "jog", "run"] as const) {
       const action = this.actions.get(state);
       if (action) action.timeScale = this.animationSpeed * this.movementSpeedScale;
     }
@@ -164,6 +178,12 @@ export class CharacterAnimationController {
   }
 
   private movementLocomotion(): CharacterLocomotionState {
+    if (this.actions.has("jog")) {
+      const runThreshold = this.locomotionState === "run" ? 1.3 : 1.35;
+      if (this.actions.has("run") && this.movementSpeedScale >= runThreshold) return "run";
+      const jogThreshold = this.locomotionState === "jog" || this.locomotionState === "run" ? 1.04 : 1.08;
+      return this.movementSpeedScale >= jogThreshold ? "jog" : "walk";
+    }
     const threshold = this.locomotionState === "run" ? 1.06 : 1.16;
     return this.actions.has("run") && this.movementSpeedScale >= threshold ? "run" : "walk";
   }
@@ -301,10 +321,13 @@ export class CharacterAnimationController {
     const action = this.actions.get(state);
     if (!action) return;
 
-    const changingGait = (state === "walk" && this.state === "run")
-      || (state === "run" && this.state === "walk");
+    const changingGait = this.state !== undefined && this.state !== "idle"
+      && isLocomotionState(this.state) && state !== "idle" && state !== this.state;
     if (changingGait && this.activeAction) {
-      action.time = (this.activeAction.time / this.activeAction.getClip().duration) * action.getClip().duration;
+      const sourceCycles = this.state === "walk" ? this.walkCycles : 1;
+      const targetCycles = state === "walk" ? this.walkCycles : 1;
+      const phase = (this.activeAction.time / (this.activeAction.getClip().duration / sourceCycles)) % 1;
+      action.time = phase * action.getClip().duration / targetCycles;
     }
 
     action.enabled = true;
@@ -320,7 +343,7 @@ export class CharacterAnimationController {
   private syncLocomotionPhase() {
     if (!this.locomotionLayer) return;
     let poseChanged = false;
-    for (const state of ["idle", "walk", "run"] as const) {
+    for (const state of ["idle", "walk", "jog", "run"] as const) {
       const source = this.locomotionLayer.actions.get(state);
       const target = this.actions.get(state);
       if (source && target && Math.abs(target.time - source.time) > 1e-6) {

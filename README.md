@@ -48,13 +48,15 @@ http://localhost:6173/character-preview.html
 
 验收台默认加载仓库根目录下的 `ksman_v3_walk_1k_meshopt.glb`，支持旋转、缩放、播放暂停、逐帧拖动、播放速度、循环和骨骼显示；也可以直接拖入其他 `.glb` 文件进行对比。
 
-默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`／`RifleRun`、`Shoot` 和 `Reload` 七段源动作。`RifleWalk` 的腿部步态取自循环三次的 `Walk`，骨盆上下起伏也随之对齐，持枪上半身与骨盆转动仍保留原动作；双脚最大前后间距与 `Walk` 相差约 2.4%。摇杆推到外圈或按住 Shift 时使用导入的持枪跑步动作；Walk／Run 切换保持归一化步伐相位。跑步时枪管保持水平，走路和站立时枪口略向下。跑步射击使用运行时生成的 `RifleRunShoot`：从当前 Run 相位继续跑步，在上半身加入原始 Shoot 前 0.30 秒的相对后座力；站立和走路射击继续使用原始 `Shoot`。原始 `Idle`／`Walk` 是空手动作，预览时隐藏枪；持枪动作及 Shoot／Reload 显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk／Run；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
+默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`／`RifleRun`、`Shoot` 和 `Reload` 七段源动作。`RifleWalk` 的腿部步态取自循环三次的 `Walk`，骨盆上下起伏也随之对齐，持枪上半身与骨盆转动仍保留原动作；双脚最大前后间距与 `Walk` 相差约 2.4%。摇杆轻推使用持枪 Walk，中段提速使用运行时生成的 `RifleJog`，外圈或 Shift 使用导入的持枪 Run；Walk／Jog／Run 切换保持步伐相位。跑步时枪管保持水平，走路和站立时枪口略向下。跑步射击使用运行时生成的 `RifleRunShoot`：从当前 Run 相位继续跑步，在上半身加入原始 Shoot 前 0.30 秒的相对后座力；站立和走路射击继续使用原始 `Shoot`。原始 `Idle`／`Walk` 是空手动作，预览时隐藏枪；持枪动作及 Shoot／Reload 显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk／Jog／Run；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
 
-在「Idle / Walk / Run / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk；按住空格加 Shift 或「按住跑步」按钮播放 Run，松开回 Idle；点按 F 播放单发 Shoot，按住 F 以游戏中的每 0.20 秒一发连续射击，跑步时自动切换为 `RifleRunShoot`；按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk／Run。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 RifleRun 时不显示跑步动作；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
+在「Idle / Walk / Jog / Run / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk；按住「按住小跑」按钮播放 Jog；按住空格加 Shift 或「按住跑步」按钮播放 Run，松开回 Idle；点按 F 播放单发 Shoot，按住 F 以游戏中的每 0.20 秒一发连续射击，跑步时自动切换为 `RifleRunShoot`；按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk／Jog／Run。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 RifleRun 时不显示跑步动作；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
 
-切换测试中的「播放 Reload」或 R 键按游戏基础换弹时间 1.30 秒播放；原始 Mixamo Reload 在单动作模式中仍保持约 3.30 秒，供检查源姿势和左腕。移动中换弹时腿部继续 Walk 或 Run，换弹结束回到当前移动状态。
+摇杆中心 12% 为死区；其外至半径 50% 固定为基础 Walk 速度，50%～85% 从 1.0 倍逐渐加速至 1.3 倍并进入 Jog，85%～100% 继续加速至最高 1.5 倍，在外圈进入 Run。`RifleJog` 在运行时由持枪 Walk／Run 混合生成，不增加 GLB 资源体积。
 
-`npm run test:animation` 检查初始姿势、权重归一化、中途反向切换、RifleWalk／Walk 步幅与脚掌高度、Walk／Run 相位、跑射相位与连续后座力、一次性 Shoot／Reload、移动时不被覆盖、结束后回退、快速重复射击、循环、单 Walk 模型兼容及实例独立性。`npm run build` 同时构建游戏和 `character-preview.html`。
+切换测试中的「播放 Reload」或 R 键按游戏基础换弹时间 1.30 秒播放；原始 Mixamo Reload 在单动作模式中仍保持约 3.30 秒，供检查源姿势和左腕。移动中换弹时腿部继续 Walk、Jog 或 Run，换弹结束回到当前移动状态。
+
+`npm run test:animation` 检查初始姿势、权重归一化、中途反向切换、RifleWalk／Walk 步幅与脚掌高度、Walk／Jog／Run 相位、跑射相位与连续后座力、一次性 Shoot／Reload、移动时不被覆盖、结束后回退、快速重复射击、循环、单 Walk 模型兼容及实例独立性。`npm run build` 同时构建游戏和 `character-preview.html`。
 
 主角的 Idle 使用原始 Mixamo 动画第 2–5 秒（30 FPS 下第 61–151 帧），重新计时为 0–3 秒。合并时根据同一帧的父子骨骼矩阵转换到基础骨架，逐帧核对姿态，不清零非根骨骼位移、不强制缩放。前 2.4 秒保留原动作，最后 0.6 秒（18 帧）用五次缓动接回开头的姿势和运动方向，使循环接缝连续，避免突然跳回或先停顿再启动；不对整段动作额外平滑。
 
@@ -120,7 +122,7 @@ make preview   # 预览生产构建，端口 6174
 
 | 输入 | 功能 |
 |---|---|
-| 左下角摇杆 | 控制方向和速度；推到外圈时加速跑动 |
+| 左下角摇杆 | 轻推按正常 Walk 速度移动，中段逐渐加速并小跑，外圈全速 Run |
 | 右下角射击按钮 | 按住连续射击 |
 | 换弹按钮 | 主动换弹 |
 | 升级卡片 | 选择升级项 |
