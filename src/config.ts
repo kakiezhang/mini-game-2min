@@ -227,7 +227,7 @@ export const getWeaponRuntimeStats = (levels: WeaponUpgradeLevels): WeaponRuntim
 export const BULLET_VISUAL = {
   speed: 1800,
   length: 36,
-  radius: 4.5,
+  radius: 6,
   maxActive: 24,
 };
 

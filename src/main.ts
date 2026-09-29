@@ -118,12 +118,14 @@ const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
 };
 
 const MAX_ACTIVE_PARTICLES = 90;
+const TOUCH_SHOT_HIT_MARGIN = 8;
 
 class OfficeEscapeGame {
   private readonly app = document.querySelector<HTMLDivElement>("#app")!;
   private readonly scene = new THREE.Scene();
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true });
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 5000);
+  private readonly coarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)");
   private readonly clock = new THREE.Clock();
   private readonly navigation = new NavigationWorld(MAP.width, MAP.depth);
   private readonly weapon = new WeaponSystem(DEFAULT_WEAPON);
@@ -147,6 +149,8 @@ class OfficeEscapeGame {
   private pendingShotAim?: { x: number; z: number };
   private input?: InputController;
   private crosshair?: THREE.Group;
+  private readonly crosshairScreenOrigin = new THREE.Vector3();
+  private readonly crosshairScreenTarget = new THREE.Vector3();
   private enemies: Enemy[] = [];
   private particles: Particle[] = [];
   private shotEffects: ShotEffect[] = [];
@@ -1029,6 +1033,7 @@ class OfficeEscapeGame {
     this.trySpawnEnemies();
     this.minimap.update(delta, this.playerState, this.enemies);
     this.updateCamera(delta);
+    this.updateCrosshair(input);
     this.updateObjectiveArrow();
     this.refreshHud();
 
@@ -1059,7 +1064,34 @@ class OfficeEscapeGame {
     const facingAim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
     this.player.rotation.y = Math.atan2(facingAim.x, facingAim.z);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
-    this.crosshair?.position.set(input.aimPointX, 5, input.aimPointZ);
+  }
+
+  private updateCrosshair(input: InputState) {
+    if (!this.crosshair) return;
+    if (window.innerHeight <= window.innerWidth || !this.coarsePointer.matches) {
+      this.crosshair.position.set(input.aimPointX, 5, input.aimPointZ);
+      return;
+    }
+
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const { x, z } = this.playerState;
+    const origin = this.crosshairScreenOrigin.set(x, 5, z).project(this.camera);
+    const target = this.crosshairScreenTarget.set(x + input.aimX * 360, 5, z + input.aimZ * 360)
+      .project(this.camera);
+    const originX = (origin.x * 0.5 + 0.5) * width;
+    const originY = (1 - origin.y) * 0.5 * height;
+    const deltaX = (target.x - origin.x) * 0.5 * width;
+    const deltaY = (origin.y - target.y) * 0.5 * height;
+    const screenDistance = Math.hypot(deltaX, deltaY);
+    const margin = 34;
+    let fraction = Math.min(1, Math.min(width * 0.4, 160) / Math.max(screenDistance, 1));
+    if (deltaX > 0) fraction = Math.min(fraction, (width - margin - originX) / deltaX);
+    if (deltaX < 0) fraction = Math.min(fraction, (margin - originX) / deltaX);
+    if (deltaY > 0) fraction = Math.min(fraction, (height - margin - originY) / deltaY);
+    if (deltaY < 0) fraction = Math.min(fraction, (margin - originY) / deltaY);
+    fraction = THREE.MathUtils.clamp(fraction, 0, 1);
+    this.crosshair.position.set(x + input.aimX * 360 * fraction, 5, z + input.aimZ * 360 * fraction);
   }
 
   private updatePlayerAnimation(delta: number, input: InputState) {
@@ -1513,6 +1545,7 @@ class OfficeEscapeGame {
   }
 
   private resolveAttack(request: AttackRequest) {
+    const hitMargin = this.coarsePointer.matches ? TOUCH_SHOT_HIT_MARGIN : 0;
     const obstacleDistance = this.navigation.raycastObstacleDistance(
       request.originX,
       request.originZ,
@@ -1531,7 +1564,7 @@ class OfficeEscapeGame {
         target: enemy,
         x: enemy.group.position.x,
         z: enemy.group.position.z,
-        radius: enemy.radius,
+        radius: enemy.radius + hitMargin,
       })),
       request.maxHits,
     );
@@ -1937,6 +1970,7 @@ class OfficeEscapeGame {
     }
     this.camera.position.lerp(target, Math.min(1, delta * 5.8));
     this.camera.lookAt(this.playerState.x, 0, this.playerState.z);
+    this.camera.updateMatrixWorld();
   }
 
   private updateObjectiveArrow() {
