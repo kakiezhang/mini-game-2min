@@ -118,6 +118,7 @@ const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
 
 const MAX_ACTIVE_PARTICLES = 90;
 const TOUCH_SHOT_HIT_MARGIN = 8;
+const UPGRADE_OFFER_SECONDS = 5;
 
 class OfficeEscapeGame {
   private readonly app = document.querySelector<HTMLDivElement>("#app")!;
@@ -183,8 +184,10 @@ class OfficeEscapeGame {
   private nextAmmoHintAt = 0;
   private cameraKick = 0;
   private playerInvincibleUntil = 0;
-  private pendingLevelUps = 0;
+  private upgradePending = false;
   private currentUpgradeChoices: WeaponUpgradeId[] = [];
+  private upgradeOfferId = 0;
+  private upgradeOfferEndsAt = 0;
   private readonly weaponUpgradeLevels: WeaponUpgradeLevels = {
     firepowerCalibration: 0,
     magazineManagement: 0,
@@ -1034,10 +1037,10 @@ class OfficeEscapeGame {
     this.updateCamera(delta);
     this.updateCrosshair(input);
     this.updateObjectiveArrow();
-    this.refreshHud();
-
     this.resolveGameResult();
+    this.updateUpgradeOffer();
     this.tryOpenUpgradePanel();
+    this.refreshHud();
   }
 
   private updatePlayer(delta: number, input: InputState) {
@@ -1746,8 +1749,8 @@ class OfficeEscapeGame {
       this.emitParticles(enemy.group.position.x, 34, enemy.group.position.z, ENEMY_CONFIG[enemy.kind].color, enemy.kind === "boss" ? 24 : 10, enemy.kind === "boss" ? 110 : 64);
       this.maybeDropAmmo(enemy);
       if (enemy.expReward > 0) {
-        this.gainExp(enemy.expReward);
-        this.showFloating(`+${enemy.expReward}`, "#9be7ff");
+        const gainedExp = this.gainExp(enemy.expReward);
+        if (gainedExp > 0) this.showFloating(`+${gainedExp}`, "#9be7ff");
       }
       if (enemy.kind === "boss" && this.bossAlertBeacon) {
         this.disposeObject(this.bossAlertBeacon);
@@ -1762,17 +1765,15 @@ class OfficeEscapeGame {
   }
 
   private gainExp(amount: number) {
-    this.playerState.exp += amount;
-    while (this.playerState.exp >= this.playerState.expToNext) {
-      this.playerState.exp -= this.playerState.expToNext;
-      this.playerState.level += 1;
-      this.playerState.expToNext = getExpToNext(this.playerState.level);
-      this.pendingLevelUps += 1;
-    }
+    if (this.upgradePending) return 0;
+    const gainedExp = Math.min(amount, this.playerState.expToNext - this.playerState.exp);
+    this.playerState.exp += gainedExp;
+    if (this.playerState.exp >= this.playerState.expToNext) this.upgradePending = true;
+    return gainedExp;
   }
 
   private tryOpenUpgradePanel() {
-    if (this.gameState !== "playing" || this.pendingLevelUps <= 0 || this.currentUpgradeChoices.length > 0) return;
+    if (this.gameState !== "playing" || !this.upgradePending || this.currentUpgradeChoices.length > 0) return;
     this.openUpgradePanel();
   }
 
@@ -1780,8 +1781,7 @@ class OfficeEscapeGame {
     const available = (Object.keys(this.weaponUpgradeLevels) as WeaponUpgradeId[])
       .filter((id) => this.weaponUpgradeLevels[id] < 5);
     if (available.length === 0) {
-      this.pendingLevelUps = 0;
-      this.closeUpgradePanel();
+      this.completeLevelUp();
       return;
     }
 
@@ -1790,12 +1790,33 @@ class OfficeEscapeGame {
       [available[index], available[swapIndex]] = [available[swapIndex], available[index]];
     }
     this.currentUpgradeChoices = available.slice(0, 3);
+    this.upgradeOfferId += 1;
+    this.upgradeOfferEndsAt = this.elapsed + UPGRADE_OFFER_SECONDS;
+    this.hud.upgradeTimer.textContent = `${UPGRADE_OFFER_SECONDS.toFixed(1)} 秒`;
+    this.hud.upgradeTimer.classList.remove("is-urgent");
+    this.hud.upgradeTimerBar.classList.remove("is-urgent");
+    this.hud.upgradeTimerBar.style.width = "100%";
     this.renderUpgradeChoices();
     this.hud.upgradePanel.classList.add("is-visible");
   }
 
+  private updateUpgradeOffer() {
+    if (this.gameState !== "playing" || this.currentUpgradeChoices.length === 0) return;
+    const remaining = this.upgradeOfferEndsAt - this.elapsed;
+    if (remaining <= 0) {
+      this.completeLevelUp();
+      this.showHint("本次强化已放弃");
+      return;
+    }
+    this.hud.upgradeTimer.textContent = `${remaining.toFixed(1)} 秒`;
+    this.hud.upgradeTimer.classList.toggle("is-urgent", remaining <= 1.5);
+    this.hud.upgradeTimerBar.classList.toggle("is-urgent", remaining <= 1.5);
+    this.hud.upgradeTimerBar.style.width = `${remaining / UPGRADE_OFFER_SECONDS * 100}%`;
+  }
+
   private renderUpgradeChoices() {
     this.hud.upgradeOptions.replaceChildren();
+    const offerId = this.upgradeOfferId;
     for (const [index, id] of this.currentUpgradeChoices.entries()) {
       const definition = WEAPON_UPGRADE_DEFINITIONS[id];
       const currentLevel = this.weaponUpgradeLevels[id];
@@ -1814,28 +1835,32 @@ class OfficeEscapeGame {
         if (event.pointerType !== "touch") return;
         event.preventDefault();
         handledByTouch = true;
-        this.selectWeaponUpgrade(id);
+        this.selectWeaponUpgrade(id, offerId);
       });
       button.addEventListener("click", () => {
-        if (!handledByTouch) this.selectWeaponUpgrade(id);
+        if (!handledByTouch) this.selectWeaponUpgrade(id, offerId);
       });
       this.hud.upgradeOptions.append(button);
     }
   }
 
-  private selectWeaponUpgrade(id: WeaponUpgradeId) {
-    if (this.gameState !== "playing" || !this.currentUpgradeChoices.includes(id)) return;
+  private selectWeaponUpgrade(id: WeaponUpgradeId, offerId = this.upgradeOfferId) {
+    if (this.gameState !== "playing" || !this.upgradePending || offerId !== this.upgradeOfferId
+      || this.elapsed >= this.upgradeOfferEndsAt || !this.currentUpgradeChoices.includes(id)) return;
     this.weaponUpgradeLevels[id] = Math.min(5, this.weaponUpgradeLevels[id] + 1);
     this.weapon.applyStats(getWeaponRuntimeStats(this.weaponUpgradeLevels));
-    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
     const definition = WEAPON_UPGRADE_DEFINITIONS[id];
     this.showHint(`${definition.title} Lv ${this.weaponUpgradeLevels[id]}`);
+    this.completeLevelUp();
+  }
 
-    if (this.pendingLevelUps > 0) {
-      this.openUpgradePanel();
-    } else {
-      this.closeUpgradePanel();
-    }
+  private completeLevelUp() {
+    if (!this.upgradePending) return;
+    this.upgradePending = false;
+    this.playerState.exp = 0;
+    this.playerState.level += 1;
+    this.playerState.expToNext = getExpToNext(this.playerState.level);
+    this.closeUpgradePanel();
   }
 
   private closeUpgradePanel() {
@@ -1844,7 +1869,7 @@ class OfficeEscapeGame {
   }
 
   private onUpgradeKeyDown = (event: KeyboardEvent) => {
-    if (this.gameState !== "playing" || this.currentUpgradeChoices.length === 0) return;
+    if (this.gameState !== "playing" || this.currentUpgradeChoices.length === 0 || event.repeat) return;
     const index = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
     if (index < 0 || index >= this.currentUpgradeChoices.length) return;
     event.preventDefault();
@@ -2091,6 +2116,7 @@ class OfficeEscapeGame {
     this.hud.card.textContent = this.hasAccessCard ? "门禁卡" : "无卡";
     this.hud.hpBar.style.width = `${(this.playerState.hp / this.playerState.maxHp) * 100}%`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
+    this.hud.expTrack.classList.toggle("is-ready", this.upgradePending && this.currentUpgradeChoices.length > 0);
     const weapon = this.weapon.getSnapshot(this.elapsed);
     this.hud.ammo.textContent = `${weapon.magazineAmmo} / ${weapon.reserveAmmo}`;
     this.hud.weaponStatus.textContent = weapon.isReloading ? "换弹中" : weapon.magazineAmmo === 0 ? "弹匣空" : "冲锋枪";
@@ -2614,8 +2640,12 @@ class OfficeEscapeGame {
       <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
       <div class="upgrade-panel" role="region" aria-label="选择强化">
         <div class="upgrade-box">
-          <div class="upgrade-title">选择一项强化</div>
-          <div class="upgrade-subtitle">战斗继续，随时点选</div>
+          <div class="upgrade-heading">
+            <div class="upgrade-title">选择一项强化</div>
+            <output class="upgrade-timer" aria-label="剩余选择时间">5.0 秒</output>
+          </div>
+          <div class="upgrade-subtitle">战斗继续 · 暂停获取经验 · 超时放弃</div>
+          <div class="upgrade-timer-track"><div class="upgrade-timer-bar"></div></div>
           <div class="upgrade-options"></div>
         </div>
       </div>
@@ -2636,6 +2666,7 @@ class OfficeEscapeGame {
       hpText: root.querySelector<HTMLDivElement>(".hp-label")!,
       hpBar: root.querySelector<HTMLDivElement>(".hp-fill")!,
       expBar: root.querySelector<HTMLDivElement>(".exp-fill")!,
+      expTrack: root.querySelector<HTMLDivElement>(".exp-track")!,
       timer: root.querySelector<HTMLDivElement>(".timer")!,
       level: root.querySelector<HTMLDivElement>(".level")!,
       card: root.querySelector<HTMLDivElement>(".card")!,
@@ -2658,6 +2689,8 @@ class OfficeEscapeGame {
       fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
       reloadButton: root.querySelector<HTMLButtonElement>(".reload-button")!,
       upgradePanel: root.querySelector<HTMLDivElement>(".upgrade-panel")!,
+      upgradeTimer: root.querySelector<HTMLOutputElement>(".upgrade-timer")!,
+      upgradeTimerBar: root.querySelector<HTMLDivElement>(".upgrade-timer-bar")!,
       upgradeOptions: root.querySelector<HTMLDivElement>(".upgrade-options")!,
       result: root.querySelector<HTMLDivElement>(".result")!,
       resultTitle: root.querySelector<HTMLDivElement>(".result-title")!,
