@@ -32,6 +32,7 @@ export interface CharacterVisual {
   readonly root: THREE.Group;
   readonly muzzleSocket?: THREE.Object3D;
   setMovement(directionX: number, directionZ: number): void;
+  setMovementSpeedScale(scale: number): void;
   setState(state: CharacterAnimationState): void;
   playOneShot(state: CharacterOneShotState, options?: CharacterActionPlaybackOptions): boolean;
   stopOneShot(state: CharacterOneShotState): boolean;
@@ -63,6 +64,8 @@ export class StaticCharacterVisual implements CharacterVisual {
   constructor(readonly root = new THREE.Group()) {}
 
   setMovement(_directionX: number, _directionZ: number) {}
+
+  setMovementSpeedScale(_scale: number) {}
 
   setState(_state: CharacterAnimationState) {}
 
@@ -146,6 +149,10 @@ export class AnimatedCharacter implements CharacterVisual {
 
   setMovement(directionX: number, directionZ: number) {
     this.animation.setMovement(directionX, directionZ);
+  }
+
+  setMovementSpeedScale(scale: number) {
+    this.animation.setMovementSpeedScale(scale);
   }
 
   update(delta: number) {

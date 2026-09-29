@@ -126,6 +126,13 @@ export class CharacterAnimationController {
     this.setLocomotion(Math.hypot(x, z) > 0.08 ? "walk" : "idle");
   }
 
+  setMovementSpeedScale(scale: number) {
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    this.locomotionLayer?.setMovementSpeedScale(scale);
+    const walk = this.actions.get("walk");
+    if (walk) walk.timeScale = this.animationSpeed * THREE.MathUtils.clamp(scale, 0.2, 2);
+  }
+
   setState(state: CharacterAnimationState) {
     if (isLocomotionState(state)) this.setLocomotion(state);
     else this.playOneShot(state as CharacterOneShotState);

@@ -1,5 +1,5 @@
 import { updateEnemyBehavior, confirmEnemyHit } from "../src/ai/enemy-ai-behavior.js";
-import { createEnemyAiRuntime } from "../src/ai/enemy-ai-runtime.js";
+import { createEnemyAiRuntime, getPatrolZoneAt } from "../src/ai/enemy-ai-runtime.js";
 import { NavigationWorld } from "../src/navigation.js";
 
 const assert: (condition: unknown, message: string) => asserts condition = (condition, message) => {
@@ -19,6 +19,10 @@ const createSample = (now: number, playerX: number, playerZ: number) => ({
   playerZ,
   playerRadius: 30,
 });
+
+assertEqual(getPatrolZoneAt(1390, 280), "eastArchive", "east archive enemies should patrol locally");
+assertEqual(getPatrolZoneAt(1200, 840), "eastWorkstation", "east workstation enemies should patrol locally");
+assertEqual(getPatrolZoneAt(1390, 1420), "eastLounge", "east lounge enemies should patrol locally");
 
 const testPatrolAndVisionReaction = () => {
   const navigation = new NavigationWorld(1080, 1720);

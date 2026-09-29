@@ -174,6 +174,7 @@ class OfficeEscapeGame {
   private evacuationComplete = false;
   private nextElevatorHintAt = 0;
   private slowUntil = 0;
+  private moveSpeedMultiplier = 1;
   private lastHintTimer = 0;
   private nextWeaponHintAt = 0;
   private nextAmmoHintAt = 0;
@@ -187,7 +188,7 @@ class OfficeEscapeGame {
   };
 
   private readonly playerState = {
-    x: 270,
+    x: 1200,
     z: 840,
     hp: PLAYER_CONFIG.initialHp,
     maxHp: PLAYER_CONFIG.maxHp,
@@ -242,8 +243,8 @@ class OfficeEscapeGame {
   }
 
   private setupCamera() {
-    this.camera.position.set(890, 930, 1780);
-    this.camera.lookAt(270, 0, 840);
+    this.camera.position.set(this.playerState.x + 620, 930, this.playerState.z + 940);
+    this.camera.lookAt(this.playerState.x, 0, this.playerState.z);
   }
 
   private createLights() {
@@ -256,8 +257,8 @@ class OfficeEscapeGame {
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.bias = -0.00018;
     sun.shadow.normalBias = 0.035;
-    sun.shadow.camera.left = -950;
-    sun.shadow.camera.right = 950;
+    sun.shadow.camera.left = -1600;
+    sun.shadow.camera.right = 1600;
     sun.shadow.camera.top = 1200;
     sun.shadow.camera.bottom = -1200;
     sun.shadow.camera.near = 120;
@@ -270,6 +271,7 @@ class OfficeEscapeGame {
 
     this.addAreaLight(270, 280, 0xffd27a, 1.08);
     this.addAreaLight(810, 840, 0xb9f5bf, 0.9);
+    this.addAreaLight(1390, 840, 0xb9f5bf, 0.9);
     this.addAreaLight(540, 1440, 0x9fd0ff, 1.12);
   }
 
@@ -280,7 +282,7 @@ class OfficeEscapeGame {
   }
 
   private createMap() {
-    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0x3d4942, 0.94, "concrete", 6, 9));
+    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0x3d4942, 0.94, "concrete", 9, 9));
     ground.position.set(MAP.width / 2, -4, MAP.depth / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
@@ -291,6 +293,9 @@ class OfficeEscapeGame {
       { x: 270, z: 840, w: 520, d: 540, color: 0x293f47, style: "tile" },
       { x: 810, z: 840, w: 520, d: 540, color: 0x354635, style: "tile" },
       { x: 540, z: 1420, w: 1040, d: 560, color: 0x313a44, style: "concrete" },
+      { x: 1390, z: 280, w: 660, d: 540, color: 0x3d3b45, style: "carpet" },
+      { x: 1390, z: 840, w: 660, d: 540, color: 0x304640, style: "tile" },
+      { x: 1390, z: 1420, w: 660, d: 560, color: 0x33434b, style: "concrete" },
     ];
 
     for (const room of rooms) {
@@ -314,11 +319,20 @@ class OfficeEscapeGame {
     this.addWall(540, 449, 24, 198);
     this.addWall(540, 681, 24, 218);
     this.addWall(540, 1019, 24, 178);
+    // Two broad doorways connect the added east rooms without forming another long corridor.
+    this.addWall(1210, 560, 220, 24);
+    this.addWall(1580, 560, 240, 24);
+    this.addWall(1220, 1120, 240, 24);
+    this.addWall(1580, 1120, 240, 24);
 
     this.addDesk(250, 770, 270, 70, 42, 0xa66f3f);
     this.addDesk(260, 925, 240, 70, 42, 0xa66f3f);
     this.addDesk(270, 280, 280, 118, 46, 0x9a6a42);
     this.addDesk(820, 265, 260, 118, 54, 0x8f5a35);
+    this.addDesk(1390, 270, 250, 100, 48, 0x806449);
+    this.addDesk(1330, 760, 210, 72, 42, 0xa66f3f);
+    this.addDesk(1550, 910, 200, 72, 42, 0xa66f3f);
+    this.addDesk(1400, 1420, 210, 100, 38, 0x806449);
     this.addCoffeeMachine(825, 805);
     this.addElevatorDoor();
     this.addChairs();
@@ -415,12 +429,18 @@ class OfficeEscapeGame {
     this.addZonePanel(810, 280, 420, 360, 0x6b3f2e, 0.14);
     this.addZonePanel(810, 840, 410, 350, 0x315f3e, 0.15);
     this.addZonePanel(540, 1420, 470, 270, 0x334b62, 0.16);
+    this.addZonePanel(1390, 280, 490, 350, 0x60516a, 0.14);
+    this.addZonePanel(1390, 840, 520, 380, 0x285954, 0.15);
+    this.addZonePanel(1390, 1420, 490, 290, 0x33576a, 0.15);
 
     this.addFloorLabel(270, 610, "WORK", 0x8bdff2, 0.42);
     this.addFloorLabel(270, 95, "MEET", 0xd9b6ff, 0.38);
     this.addFloorLabel(810, 95, "BOSS", 0xffc08a, 0.4);
     this.addFloorLabel(840, 610, "SUPPLY", 0xa7f3c0, 0.36);
     this.addFloorLabel(540, 1320, "EXIT", 0xbdefff, 0.5);
+    this.addFloorLabel(1390, 95, "ARCHIVE", 0xd9b6ff, 0.35);
+    this.addFloorLabel(1390, 620, "WORK", 0x8bdff2, 0.4);
+    this.addFloorLabel(1390, 1210, "LOUNGE", 0xbdefff, 0.35);
 
     this.addGuideLine([
       [270, 840],
@@ -436,6 +456,7 @@ class OfficeEscapeGame {
     this.addBossOfficeDetails();
     this.addSupplyRoomDetails();
     this.addElevatorDetails();
+    this.addEastWingDetails();
 
     this.addLightStrip(160, 560, 190, Math.PI / 2, 0xffdf91);
     this.addLightStrip(890, 560, 170, Math.PI / 2, 0xbdefff);
@@ -582,6 +603,23 @@ class OfficeEscapeGame {
     this.addGuideSegment(660, 1370, 660, 1512, 8, 0xbdefff, 0.46);
     this.addHazardStripes(540, 1305, 260);
     this.addWallMarker(540, 1585, Math.PI, 0xbdefff);
+  }
+
+  private addEastWingDetails() {
+    this.addComputerSet(1320, 245, 0, 0xd9b6ff);
+    this.addComputerSet(1450, 280, Math.PI, 0xd9b6ff);
+    this.addComputerSet(1270, 750, 0, 0x7dd3fc);
+    this.addComputerSet(1510, 900, Math.PI, 0x38bdf8);
+    this.addSupplyPad(1390, 1010, 0x32d583);
+    this.addFilingCabinet(1640, 270, 0x566251);
+    this.addFilingCabinet(1630, 1010, 0x4e6571);
+    this.addCrateStack(1250, 1450, 0.3);
+    this.addPottedPlant(1130, 340);
+    this.addPottedPlant(1610, 1350);
+    this.addPaperScatter(1390, 370, 8);
+    this.addPaperScatter(1380, 1440, 9);
+    this.addLightStrip(1390, 560, 170, Math.PI / 2, 0xbdefff);
+    this.addLightStrip(1390, 1120, 170, Math.PI / 2, 0xbdefff);
   }
 
   private addComputerSet(x: number, z: number, rotationY: number, glowColor: number) {
@@ -1000,7 +1038,11 @@ class OfficeEscapeGame {
 
   private updatePlayer(delta: number, input: InputState) {
     const slowMultiplier = this.elapsed < this.slowUntil ? 0.7 : 1;
-    const speed = this.playerState.speed * slowMultiplier;
+    const targetMultiplier = input.moveSpeedMultiplier;
+    this.moveSpeedMultiplier = targetMultiplier <= 1
+      ? targetMultiplier || 1
+      : THREE.MathUtils.lerp(this.moveSpeedMultiplier, targetMultiplier, 1 - Math.exp(-delta * 10));
+    const speed = this.playerState.speed * slowMultiplier * this.moveSpeedMultiplier;
     const nextPosition = this.navigation.moveCircle(
       this.playerState.x,
       this.playerState.z,
@@ -1023,6 +1065,7 @@ class OfficeEscapeGame {
   private updatePlayerAnimation(delta: number, input: InputState) {
     if (!this.playerVisual) return;
     this.playerVisual.setMovement(input.moveX, input.moveZ);
+    this.playerVisual.setMovementSpeedScale(this.moveSpeedMultiplier * (this.elapsed < this.slowUntil ? 0.7 : 1));
     this.playerVisual.update(delta);
   }
 
@@ -2493,7 +2536,7 @@ class OfficeEscapeGame {
     root.className = "ui-root";
     root.innerHTML = `
       <div class="minimap-panel">
-        <canvas class="minimap-canvas" width="240" height="336" aria-label="实时地图"></canvas>
+        <canvas class="minimap-canvas" width="240" height="240" aria-label="实时地图"></canvas>
       </div>
       <div class="timer-panel">
         <div class="timer">120</div>

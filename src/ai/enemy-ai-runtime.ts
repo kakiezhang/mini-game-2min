@@ -22,7 +22,10 @@ export type PatrolZoneId =
   | "bossOffice"
   | "workstation"
   | "pantry"
-  | "elevatorCorridor";
+  | "elevatorCorridor"
+  | "eastArchive"
+  | "eastWorkstation"
+  | "eastLounge";
 
 export type NavigationPoint = {
   x: number;
@@ -108,6 +111,10 @@ const STUCK_SAMPLE_INTERVAL = 0.5;
 const STUCK_MIN_DISPLACEMENT = 5;
 
 export const getPatrolZoneAt = (x: number, z: number): PatrolZoneId => {
+  if (x >= 1080) {
+    if (z < 560) return "eastArchive";
+    return z < 1120 ? "eastWorkstation" : "eastLounge";
+  }
   if (z >= 1120) return "elevatorCorridor";
   if (z < 560) return x < 540 ? "meetingRoom" : "bossOffice";
   return x < 540 ? "workstation" : "pantry";

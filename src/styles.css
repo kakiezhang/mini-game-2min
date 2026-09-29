@@ -415,6 +415,15 @@ canvas {
   pointer-events: auto;
 }
 
+.joystick.is-running {
+  border-color: #facc15;
+  box-shadow: 0 0 18px rgba(250, 204, 21, 0.42);
+}
+
+.joystick.is-running .joystick-knob {
+  border-color: #facc15;
+}
+
 .joystick-knob {
   position: absolute;
   left: 50%;

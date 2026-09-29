@@ -1,5 +1,5 @@
 export const MAP = {
-  width: 1080,
+  width: 1720,
   depth: 1720,
 };
 
@@ -26,6 +26,7 @@ export const PLAYER_CONFIG = {
   maxHp: 100,
   initialHp: 100,
   baseSpeed: 82,
+  maxRunSpeedMultiplier: 1.5,
   radius: 30,
   initialLevel: 1,
   initialExp: 0,
@@ -245,6 +246,7 @@ export const AMMO_CONFIG = {
   fixedSpawns: [
     { id: "workstation", x: 450, z: 1000 },
     { id: "bossOffice", x: 950, z: 450 },
+    { id: "eastWorkstation", x: 1390, z: 1010 },
   ],
 };
 

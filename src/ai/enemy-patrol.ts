@@ -18,6 +18,15 @@ const PATROL_POINTS: Record<PatrolZoneId, readonly NavigationPoint[]> = {
     { x: 90, z: 1210 }, { x: 300, z: 1250 }, { x: 790, z: 1250 }, { x: 990, z: 1210 },
     { x: 190, z: 1460 }, { x: 870, z: 1460 },
   ],
+  eastArchive: [
+    { x: 1170, z: 160 }, { x: 1570, z: 160 }, { x: 1200, z: 430 }, { x: 1560, z: 430 },
+  ],
+  eastWorkstation: [
+    { x: 1170, z: 700 }, { x: 1600, z: 690 }, { x: 1190, z: 1020 }, { x: 1550, z: 1040 },
+  ],
+  eastLounge: [
+    { x: 1180, z: 1250 }, { x: 1570, z: 1250 }, { x: 1180, z: 1510 }, { x: 1570, z: 1510 },
+  ],
 };
 
 export type PatrolTarget = {

@@ -138,8 +138,8 @@ export class GameMinimap {
       context.moveTo(x, viewport.offsetY);
       context.lineTo(x, viewport.offsetY + mapDepth);
     }
-    for (let row = 1; row < 6; row += 1) {
-      const y = viewport.offsetY + (mapDepth * row) / 6;
+    for (let row = 1; row < 4; row += 1) {
+      const y = viewport.offsetY + (mapDepth * row) / 4;
       context.moveTo(viewport.offsetX, y);
       context.lineTo(viewport.offsetX + mapWidth, y);
     }

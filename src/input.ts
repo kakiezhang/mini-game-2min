@@ -1,10 +1,24 @@
 import * as THREE from "three";
+import { PLAYER_CONFIG } from "./config";
 
 const JOYSTICK_MAX_DISTANCE = 44;
+const JOYSTICK_DEADZONE = 0.12;
+const JOYSTICK_WALK_LIMIT = 0.72;
+
+export const getJoystickSpeedMultiplier = (strength: number) => {
+  if (strength <= JOYSTICK_DEADZONE) return 0;
+  if (strength <= JOYSTICK_WALK_LIMIT) {
+    const progress = (strength - JOYSTICK_DEADZONE) / (JOYSTICK_WALK_LIMIT - JOYSTICK_DEADZONE);
+    return 0.35 + progress * 0.65;
+  }
+  const runProgress = (Math.min(strength, 1) - JOYSTICK_WALK_LIMIT) / (1 - JOYSTICK_WALK_LIMIT);
+  return 1 + runProgress * (PLAYER_CONFIG.maxRunSpeedMultiplier - 1);
+};
 
 export type InputState = {
   moveX: number;
   moveZ: number;
+  moveSpeedMultiplier: number;
   aimX: number;
   aimZ: number;
   aimPointX: number;
@@ -36,6 +50,7 @@ export class InputController {
   private joystickCenterY = 0;
   private joystickX = 0;
   private joystickZ = 0;
+  private joystickSpeedMultiplier = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -71,10 +86,14 @@ export class InputController {
     if (this.keys.has("KeyD") || this.keys.has("ArrowRight")) moveX += 1;
     if (this.keys.has("KeyW") || this.keys.has("ArrowUp")) moveZ -= 1;
     if (this.keys.has("KeyS") || this.keys.has("ArrowDown")) moveZ += 1;
+    const keyboardMoving = Math.hypot(moveX, moveZ) > 0.001;
     moveX += this.joystickX;
     moveZ += this.joystickZ;
 
     const moveLength = Math.hypot(moveX, moveZ);
+    const moveSpeedMultiplier = moveLength <= 0.001 ? 0 : keyboardMoving
+      ? this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? PLAYER_CONFIG.maxRunSpeedMultiplier : 1
+      : this.joystickSpeedMultiplier;
     if (moveLength > 0.001) {
       moveX /= moveLength;
       moveZ /= moveLength;
@@ -107,6 +126,7 @@ export class InputController {
     return {
       moveX,
       moveZ,
+      moveSpeedMultiplier,
       aimX: this.lastAimX,
       aimZ: this.lastAimZ,
       aimPointX,
@@ -199,9 +219,12 @@ export class InputController {
     const deltaX = clientX - this.joystickCenterX;
     const deltaY = clientY - this.joystickCenterY;
     const distance = Math.min(Math.hypot(deltaX, deltaY), JOYSTICK_MAX_DISTANCE);
+    const strength = distance / JOYSTICK_MAX_DISTANCE;
     const angle = Math.atan2(deltaY, deltaX);
-    this.joystickX = (Math.cos(angle) * distance) / JOYSTICK_MAX_DISTANCE;
-    this.joystickZ = (Math.sin(angle) * distance) / JOYSTICK_MAX_DISTANCE;
+    this.joystickX = strength > JOYSTICK_DEADZONE ? Math.cos(angle) : 0;
+    this.joystickZ = strength > JOYSTICK_DEADZONE ? Math.sin(angle) : 0;
+    this.joystickSpeedMultiplier = getJoystickSpeedMultiplier(strength);
+    this.joystick.base.classList.toggle("is-running", this.joystickSpeedMultiplier > 1.08);
     this.joystick.knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
   }
 
@@ -210,6 +233,8 @@ export class InputController {
     this.joystickPointerId = -1;
     this.joystickX = 0;
     this.joystickZ = 0;
+    this.joystickSpeedMultiplier = 0;
+    this.joystick.base.classList.remove("is-running");
     this.joystick.knob.style.transform = "translate(-50%, -50%)";
   };
 }
