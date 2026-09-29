@@ -20,6 +20,7 @@ export type CharacterModelConfig = {
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
+  runShootFromRun?: boolean;
   heldWeapon?: "smg";
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
 };

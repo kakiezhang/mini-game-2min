@@ -61,7 +61,7 @@
           <div class="transition-actions">
             <button id="hold-move" class="hold-button" type="button" aria-pressed="false">按住移动 · 松开站立</button>
             <button id="hold-run" class="hold-button" type="button" aria-pressed="false">按住跑步</button>
-            <button id="shoot-action" class="shoot-button" type="button">播放 Shoot · F</button>
+            <button id="shoot-action" class="shoot-button" type="button">播放 Shoot · 按住 F 连射</button>
             <button id="reload-action" class="secondary-button" type="button">播放 Reload · R</button>
             <button id="auto-transition" class="secondary-button" type="button" aria-pressed="false">自动完整流程</button>
             <button id="transition-pause" class="secondary-button" type="button">暂停测试</button>
@@ -72,7 +72,7 @@
             <div><span class="field-label">过渡</span><output id="transition-status">稳定 · 0.12 s</output></div>
             <div><span class="field-label">实际混合权重</span><output id="blend-weights">Idle 100% · Walk 0% · Run 0% · Shoot 0% · Reload 0%</output><div class="weight-bar"><span id="idle-weight-bar"></span><span id="walk-weight-bar"></span><span id="run-weight-bar"></span><span id="shoot-weight-bar"></span><span id="reload-weight-bar"></span></div></div>
           </div>
-          <p class="transition-hint">按住空格模拟走路，空格 + Shift 或「按住跑步」模拟加速；F 播放单发 Shoot，R 播放约 1.3 秒的游戏换弹动作。Shoot／Reload 只覆盖上半身，腿部继续当前步态；本页不移动模型位置。</p>
+          <p class="transition-hint">按住空格模拟走路，空格 + Shift 或「按住跑步」模拟加速；点射 F 播放单发 Shoot，按住 F 连射，R 播放约 1.3 秒的游戏换弹动作。跑步射击会显示 RifleRunShoot；Shoot／Reload 只覆盖上半身，腿部继续当前步态；本页不移动模型位置。</p>
         </div>
         <div class="transport-options">
           <label class="speed-control">

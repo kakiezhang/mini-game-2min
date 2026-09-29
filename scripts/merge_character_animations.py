@@ -50,6 +50,10 @@ def parse_args() -> argparse.Namespace:
         metavar="NAME=SIDE:FRACTION",
         help="Share wrist twist with Left/Right forearm, preserving hand pose (e.g. Shoot=Left:0.5)",
     )
+    parser.add_argument(
+        "--clip-walk-legs", action="append", default=[], metavar="NAME=CYCLES",
+        help="Use the base Walk legs and hip height for CYCLES steps, keeping this clip's upper body",
+    )
     return parser.parse_args(values)
 
 
@@ -172,6 +176,16 @@ def is_arm_or_hand_bone(name: str) -> bool:
     return any(part in name for part in ("Shoulder", "Arm", "ForeArm", "Hand"))
 
 
+LEG_BONE_NAMES = {
+    f"mixamorig:{side}{part}" for side in ("Left", "Right")
+    for part in ("UpLeg", "Leg", "Foot", "ToeBase", "Toe_End")
+}
+
+
+def is_leg_bone(name: str) -> bool:
+    return name in LEG_BONE_NAMES
+
+
 def close_loop(samples: dict, blend_count: int) -> None:
     """Keep the clip length/body; join both pose and velocity at its seam.
 
@@ -223,6 +237,8 @@ def bake_action_onto_armature(
     smooth_radius: int = 0,
     loop_blend_frames: int = 0,
     forearm_twists: list[tuple[str, float]] | None = None,
+    walk_leg_action: bpy.types.Action | None = None,
+    walk_leg_cycles: int = 0,
 ) -> bpy.types.Action:
     source_armature.animation_data.action = source_action
     if target_armature.animation_data is None:
@@ -281,6 +297,52 @@ def bake_action_onto_armature(
                 rotation.negate()
             samples[target_bone.name].append((location, rotation, scale))
 
+    sample_count = source_end - source_start + 1
+    if walk_leg_action is not None:
+        if sample_count < 2:
+            raise SystemExit(f"Animation clip {action_name!r} needs at least two frames for Walk legs")
+        walk_start, walk_end = walk_leg_action.frame_range
+        target_armature.animation_data.action = walk_leg_action
+        hips_name = "mixamorig:Hips"
+        hips_bone = target_armature.pose.bones[hips_name]
+        for index in range(sample_count):
+            phase = (index * walk_leg_cycles / (sample_count - 1)) % 1
+            walk_frame = walk_start + phase * (walk_end - walk_start)
+            bpy.context.scene.frame_set(math.floor(walk_frame), subframe=walk_frame % 1)
+            bpy.context.view_layer.update()
+            for bone in target_bones:
+                if not is_leg_bone(bone.name):
+                    continue
+                location, rotation, scale = bone.matrix_basis.decompose()
+                previous = samples[bone.name]
+                if index and previous[index - 1][1].dot(rotation) < 0:
+                    rotation.negate()
+                previous[index] = (location, rotation, scale)
+
+            # Walk's leg extension needs its matching vertical pelvis motion.
+            # Keep RifleWalk's horizontal sway and hip rotation for the gun pose.
+            original_hips = reference_poses[index][hips_name].copy()
+            walk_world = target_armature.matrix_world @ hips_bone.matrix
+            original_world = target_armature.matrix_world @ original_hips
+            world_height_delta = walk_world.translation.z - original_world.translation.z
+            original_hips.translation += (
+                target_armature.matrix_world.inverted_safe().to_3x3()
+                @ Vector((0, 0, world_height_delta))
+            )
+            parent = hips_bone.parent
+            parent_args = dict(
+                parent_matrix=reference_poses[index][parent.name],
+                parent_matrix_local=parent.bone.matrix_local,
+            ) if parent else {}
+            basis = hips_bone.bone.convert_local_to_pose(
+                original_hips, hips_bone.bone.matrix_local, invert=True, **parent_args,
+            )
+            location, rotation, scale = basis.decompose()
+            previous = samples[hips_name]
+            if index and previous[index - 1][1].dot(rotation) < 0:
+                rotation.negate()
+            previous[index] = (location, rotation, scale)
+
     if smooth_radius > 0:
         for target_bone in target_bones:
             if not is_arm_or_hand_bone(target_bone.name):
@@ -294,7 +356,6 @@ def bake_action_onto_armature(
                 smoothed.append((location.copy(), rotation, scale.copy()))
             samples[target_bone.name] = smoothed
 
-    sample_count = source_end - source_start + 1
     blend_count = min(loop_blend_frames, max(0, sample_count - 1))
     if blend_count > 0:
         close_loop(samples, blend_count)
@@ -333,8 +394,9 @@ def bake_action_onto_armature(
         bpy.context.scene.frame_set(index)
         bpy.context.view_layer.update()
         for bone in target_bones:
-            actual = bone.matrix
-            expected = desired[bone.name]
+            actual = bone.matrix_basis if walk_leg_action is not None else bone.matrix
+            expected = (Matrix.LocRotScale(*samples[bone.name][index])
+                        if walk_leg_action is not None else desired[bone.name])
             max_position_error = max(max_position_error, (actual.translation - expected.translation).length)
             max_matrix_error = max(max_matrix_error, max(
                 abs(actual[row][col] - expected[row][col]) for row in range(4) for col in range(4)
@@ -351,6 +413,7 @@ def bake_action_onto_armature(
         "output_frames": [0, sample_count - 1], "bones": len(target_bones),
         "max_matrix_error": max_matrix_error, "max_position_error": max_position_error,
         "loop_blend_frames": blend_count,
+        "walk_leg_cycles": walk_leg_cycles,
         "max_unchanged_matrix_error": max_unchanged_matrix_error,
         "forearm_twist_adjustments": [
             {"side": side, "fraction": fraction,
@@ -383,6 +446,7 @@ def main() -> None:
         parse_named_int(value, "clip loop blend") for value in args.clip_loop_blend
     )
     clip_forearm_twists = {}
+    clip_walk_legs = dict(parse_named_int(value, "clip walk legs") for value in args.clip_walk_legs)
     for value in args.clip_forearm_twist:
         name, adjustment = parse_forearm_twist(value)
         if name not in {name for name, _path in clips}:
@@ -391,6 +455,10 @@ def main() -> None:
         if any(side == adjustment[0] for side, _fraction in entries):
             raise SystemExit(f"Duplicate forearm twist adjustment: {value!r}")
         entries.append(adjustment)
+    if any(cycles <= 0 for cycles in clip_walk_legs.values()):
+        raise SystemExit("Clip walk leg cycles must be positive")
+    if set(clip_walk_legs) - {name for name, _path in clips}:
+        raise SystemExit("Clip walk legs references an unknown clip")
 
     for label, path in [("Base FBX", base_path), *[(name, path) for name, path in clips]]:
         if not path.is_file():
@@ -450,6 +518,8 @@ def main() -> None:
             smooth_radius=clip_smoothing.get(clip_name, 0),
             loop_blend_frames=clip_loop_blends.get(clip_name, 0),
             forearm_twists=clip_forearm_twists.get(clip_name),
+            walk_leg_action=base_action if clip_name in clip_walk_legs else None,
+            walk_leg_cycles=clip_walk_legs.get(clip_name, 0),
         )
         animation_actions.append(action)
 

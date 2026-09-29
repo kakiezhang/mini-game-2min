@@ -123,6 +123,8 @@ let transitionController: CharacterAnimationController | undefined;
 let reviewMode: "single" | "transition" = "single";
 let keyHeld = false;
 let shiftHeld = false;
+let fireHeld = false;
+let fireRepeatRemaining = 0;
 let heldPointer: number | undefined;
 let runPointer: number | undefined;
 let autoEnabled = false;
@@ -140,7 +142,8 @@ const updateTransitionDisplay = () => {
   const shoot = snapshot.actions.find(action => action.state === "shoot");
   const reload = snapshot.actions.find(action => action.state === "reload");
   const labels = { idle: "Idle", walk: "Walk", run: "Run", shoot: "Shoot", reload: "Reload" } as const;
-  transitionState.value = labels[snapshot.state as keyof typeof labels] ?? snapshot.state ?? "—";
+  transitionState.value = snapshot.state === "shoot" && shoot?.name === "RifleRunShoot"
+    ? "RifleRunShoot" : labels[snapshot.state as keyof typeof labels] ?? snapshot.state ?? "—";
   locomotionState.value = labels[snapshot.locomotionState];
   const statusLabel = transitionPaused ? "暂停" : snapshot.oneShotState ? "一次性动作" : snapshot.transitioning ? "混合中" : "稳定";
   transitionStatus.value = `${statusLabel} · ${snapshot.transitionDuration.toFixed(2)} s`;
@@ -177,6 +180,8 @@ const applyTestMovement = () => {
 const releaseTestInput = () => {
   keyHeld = false;
   shiftHeld = false;
+  fireHeld = false;
+  fireRepeatRemaining = 0;
   const pointer = heldPointer;
   heldPointer = undefined;
   if (pointer !== undefined && holdMove.hasPointerCapture(pointer)) holdMove.releasePointerCapture(pointer);
@@ -312,11 +317,13 @@ const setReviewMode = (mode: "single" | "transition") => {
       },
       shootUpperBodyOnly,
       shootPulseEndSeconds,
+      runShootFromRun: Boolean(shootPulseEndSeconds && armedLocomotion
+        && activeGltf.animations.some(clip => /^RifleRun$/i.test(clip.name))),
     });
     transitionPaused = false;
     transitionPause.textContent = "暂停测试";
     modeHint.textContent = shootPulseEndSeconds
-      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk／Run" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
+      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk／Run，跑射使用 RifleRunShoot" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
       : shootUpperBodyOnly
         ? "与游戏共用控制器 · Shoot 只覆盖上半身，腿部继续 Idle／Walk"
         : "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
@@ -608,7 +615,11 @@ window.addEventListener("keydown", (event) => {
     } else resetViewButton.click();
   } else if (event.key.toLowerCase() === "f" && reviewMode === "transition" && !shootAction.disabled) {
     event.preventDefault();
-    if (!event.repeat) shootAction.click();
+    if (!fireHeld) {
+      fireHeld = true;
+      fireRepeatRemaining = 0.2;
+      shootAction.click();
+    }
   } else if (event.key.toLowerCase() === "s") {
     skeletonToggle.click();
   }
@@ -616,6 +627,10 @@ window.addEventListener("keydown", (event) => {
 window.addEventListener("keyup", event => {
   if (event.code === "Space") keyHeld = false;
   else if (event.code === "ShiftLeft" || event.code === "ShiftRight") shiftHeld = false;
+  else if (event.code === "KeyF") {
+    fireHeld = false;
+    fireRepeatRemaining = 0;
+  }
   else return;
   applyTestMovement();
 });
@@ -645,6 +660,13 @@ renderer.setAnimationLoop(() => {
     if (!transitionPaused) {
       if (autoEnabled) autoTime += delta * playbackSpeed;
       applyTestMovement();
+      if (fireHeld) {
+        fireRepeatRemaining -= delta * playbackSpeed;
+        if (fireRepeatRemaining <= 0) {
+          fireRepeatRemaining += 0.2;
+          shootAction.click();
+        }
+      }
       transitionController.update(delta * playbackSpeed);
     }
     updateTransitionDisplay();

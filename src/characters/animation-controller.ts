@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RunShootClipFactory } from "./run-shoot-animation.js";
 
 export type CharacterLocomotionState = "idle" | "walk" | "run";
 export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death";
@@ -9,6 +10,7 @@ export type CharacterAnimationConfig = {
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
+  runShootFromRun?: boolean;
 };
 export type CharacterActionPlaybackOptions = {
   restartIfActive?: boolean;
@@ -57,6 +59,8 @@ export class CharacterAnimationController {
   private readonly actions = new Map<CharacterAnimationState, THREE.AnimationAction>();
   private readonly allActions: THREE.AnimationAction[] = [];
   private readonly alternateShootAction?: THREE.AnimationAction;
+  private readonly runShootFactory?: RunShootClipFactory;
+  private readonly runShootActions?: [THREE.AnimationAction, THREE.AnimationAction];
   private readonly fromWeights = new Map<THREE.AnimationAction, number>();
   private lastShootAction?: THREE.AnimationAction;
   private activeAction?: THREE.AnimationAction;
@@ -83,6 +87,7 @@ export class CharacterAnimationController {
         ...config,
         clips: { idle: config.clips.idle, walk: config.clips.walk, run: config.clips.run },
         shootUpperBodyOnly: false,
+        runShootFromRun: false,
       });
       clips = maskedClips;
     }
@@ -116,6 +121,22 @@ export class CharacterAnimationController {
         this.alternateShootAction.setEffectiveWeight(0);
         this.allActions.push(this.alternateShootAction);
       }
+    }
+    if (config.runShootFromRun) {
+      const run = findClip(clips, config.clips.run);
+      const shoot = findClip(clips, config.clips.shoot);
+      if (!config.shootUpperBodyOnly || !run || !shoot || !config.shootPulseEndSeconds) {
+        throw new Error("RifleRunShoot requires upper-body Shoot, Run, and a short Shoot pulse");
+      }
+      this.runShootFactory = new RunShootClipFactory(run, shoot, config.shootPulseEndSeconds);
+      this.runShootActions = [this.runShootFactory.createClip(), this.runShootFactory.createClip()]
+        .map(clip => {
+          const action = this.mixer.clipAction(clip);
+          action.timeScale = this.animationSpeed;
+          action.setEffectiveWeight(0);
+          this.allActions.push(action);
+          return action;
+        }) as [THREE.AnimationAction, THREE.AnimationAction];
     }
     if (!this.actions.size) throw new Error("Character contains none of the configured animation clips");
     if (this.actions.has("idle") || this.actions.has("walk")) this.activateLocomotion(true);
@@ -172,11 +193,22 @@ export class CharacterAnimationController {
     if (options.restartIfActive === false && (
       this.oneShotState === state || primaryAction.getEffectiveWeight() > 1e-6
       || (state === "shoot" && (this.alternateShootAction?.getEffectiveWeight() ?? 0) > 1e-6)
+      || (state === "shoot" && (this.runShootActions?.some(action => action.getEffectiveWeight() > 1e-6) ?? false))
     )) return false;
 
-    const action = state === "shoot" && this.alternateShootAction && this.lastShootAction === primaryAction
-      ? this.alternateShootAction : primaryAction;
-    if (state === "shoot") this.lastShootAction = action;
+    const runningShoot = state === "shoot" && this.runShootFactory !== undefined && this.runShootActions !== undefined
+      && this.locomotionState === "run";
+    const shootPair: [THREE.AnimationAction, THREE.AnimationAction | undefined] = runningShoot
+      ? this.runShootActions! : [primaryAction, this.alternateShootAction];
+    const action = state === "shoot" && shootPair[1] && this.lastShootAction === shootPair[0]
+      ? shootPair[1] : shootPair[0];
+    if (state === "shoot") {
+      if (runningShoot) {
+        const runPhase = this.locomotionLayer?.actions.get("run")?.time ?? 0;
+        this.runShootFactory!.populate(action.getClip(), runPhase, this.movementSpeedScale);
+      }
+      this.lastShootAction = action;
+    }
 
     action.enabled = true;
     action.paused = false;
@@ -243,12 +275,15 @@ export class CharacterAnimationController {
       transitionDuration: this.transitionDuration,
       transitioning: this.elapsed < this.transitionDuration,
       actions: [...this.actions.entries()].map(([state, primary]) => {
-        const alternate = state === "shoot" ? this.alternateShootAction : undefined;
-        const action = alternate && this.lastShootAction ? this.lastShootAction : primary;
+        const shootActions = state === "shoot"
+          ? [primary, this.alternateShootAction, ...(this.runShootActions ?? [])].filter(
+            (action): action is THREE.AnimationAction => action !== undefined)
+          : [primary];
+        const action = state === "shoot" && this.lastShootAction ? this.lastShootAction : primary;
         return {
-          state, name: primary.getClip().name, time: action.time,
-          duration: primary.getClip().duration,
-          weight: primary.getEffectiveWeight() + (alternate?.getEffectiveWeight() ?? 0),
+          state, name: action.getClip().name, time: action.time,
+          duration: action.getClip().duration,
+          weight: shootActions.reduce((total, candidate) => total + candidate.getEffectiveWeight(), 0),
         };
       }),
     };

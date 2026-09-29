@@ -40,6 +40,8 @@ canvas {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  --mobile-control-size: clamp(128px, 36vw, 144px);
+  --mobile-control-inner-size: clamp(50px, 14vw, 56px);
 }
 
 .ui-root::before {
@@ -407,8 +409,8 @@ canvas {
   position: absolute;
   left: max(22px, env(safe-area-inset-left));
   bottom: max(28px, env(safe-area-inset-bottom));
-  width: 104px;
-  height: 104px;
+  width: var(--mobile-control-size);
+  height: var(--mobile-control-size);
   border: 2px solid rgba(203, 213, 196, 0.56);
   border-radius: 50%;
   background: rgba(13, 19, 17, 0.42);
@@ -428,8 +430,8 @@ canvas {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 48px;
-  height: 48px;
+  width: var(--mobile-control-inner-size);
+  height: var(--mobile-control-inner-size);
   transform: translate(-50%, -50%);
   border: 3px solid rgba(47, 191, 113, 0.88);
   border-radius: 50%;
@@ -509,8 +511,8 @@ canvas {
   right: max(22px, env(safe-area-inset-right));
   bottom: max(28px, env(safe-area-inset-bottom));
   display: none;
-  width: 104px;
-  height: 104px;
+  width: var(--mobile-control-size);
+  height: var(--mobile-control-size);
   padding: 0;
   border: 2px solid rgba(255, 209, 102, 0.76);
   border-radius: 50%;
@@ -531,8 +533,8 @@ canvas {
   top: 50%;
   display: block;
   transform: translate(-50%, -50%);
-  width: 48px;
-  height: 48px;
+  width: var(--mobile-control-inner-size);
+  height: var(--mobile-control-inner-size);
   border: 3px solid #ffd166;
   border-radius: 50%;
   background: rgba(244, 240, 218, 0.86);
@@ -540,8 +542,8 @@ canvas {
 
 .reload-button {
   position: absolute;
-  right: max(45px, calc(env(safe-area-inset-right) + 23px));
-  bottom: max(145px, calc(env(safe-area-inset-bottom) + 117px));
+  right: calc(max(22px, env(safe-area-inset-right)) + clamp(35px, calc(18vw - 29px), 43px));
+  bottom: calc(max(28px, env(safe-area-inset-bottom)) + var(--mobile-control-size) + 18px);
   display: none;
   width: 58px;
   height: 58px;

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { PLAYER_CONFIG } from "./config";
 
-const JOYSTICK_MAX_DISTANCE = 44;
+const JOYSTICK_EDGE_OVERFLOW = 10;
 const JOYSTICK_DEADZONE = 0.12;
 const JOYSTICK_WALK_LIMIT = 0.72;
 
@@ -48,6 +48,7 @@ export class InputController {
   private joystickPointerId = -1;
   private joystickCenterX = 0;
   private joystickCenterY = 0;
+  private joystickMaxDistance = 44;
   private joystickX = 0;
   private joystickZ = 0;
   private joystickSpeedMultiplier = 0;
@@ -205,6 +206,8 @@ export class InputController {
     const rect = this.joystick.base.getBoundingClientRect();
     this.joystickCenterX = rect.left + rect.width / 2;
     this.joystickCenterY = rect.top + rect.height / 2;
+    const knobWidth = this.joystick.knob.getBoundingClientRect().width;
+    this.joystickMaxDistance = (rect.width - knobWidth) / 2 + JOYSTICK_EDGE_OVERFLOW;
     this.joystick.base.setPointerCapture(event.pointerId);
     this.updateJoystick(event.clientX, event.clientY);
   };
@@ -218,8 +221,8 @@ export class InputController {
   private updateJoystick(clientX: number, clientY: number) {
     const deltaX = clientX - this.joystickCenterX;
     const deltaY = clientY - this.joystickCenterY;
-    const distance = Math.min(Math.hypot(deltaX, deltaY), JOYSTICK_MAX_DISTANCE);
-    const strength = distance / JOYSTICK_MAX_DISTANCE;
+    const distance = Math.min(Math.hypot(deltaX, deltaY), this.joystickMaxDistance);
+    const strength = distance / this.joystickMaxDistance;
     const angle = Math.atan2(deltaY, deltaX);
     this.joystickX = strength > JOYSTICK_DEADZONE ? Math.cos(angle) : 0;
     this.joystickZ = strength > JOYSTICK_DEADZONE ? Math.sin(angle) : 0;
