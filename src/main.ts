@@ -90,7 +90,7 @@ type AmmoPickup = {
   phase: number;
 };
 
-type GameState = "ready" | "playing" | "levelUpPaused" | "success" | "failed";
+type GameState = "ready" | "playing" | "success" | "failed";
 type SurfaceStyle = "concrete" | "tile" | "carpet" | "wall" | "wood" | "metal" | "plastic" | "paper";
 const TEXTURE_URLS: Partial<Record<SurfaceStyle, string>> = {
   concrete: new URL("./assets/textures/concrete.png", import.meta.url).href,
@@ -111,8 +111,7 @@ const CHARACTER_TEXTURE_URLS = {
 
 const GAME_STATE_TRANSITIONS: Record<GameState, readonly GameState[]> = {
   ready: ["playing"],
-  playing: ["levelUpPaused", "success", "failed"],
-  levelUpPaused: ["playing", "success", "failed"],
+  playing: ["success", "failed"],
   success: [],
   failed: [],
 };
@@ -1773,7 +1772,7 @@ class OfficeEscapeGame {
   }
 
   private tryOpenUpgradePanel() {
-    if (this.gameState !== "playing" || this.pendingLevelUps <= 0) return;
+    if (this.gameState !== "playing" || this.pendingLevelUps <= 0 || this.currentUpgradeChoices.length > 0) return;
     this.openUpgradePanel();
   }
 
@@ -1793,7 +1792,6 @@ class OfficeEscapeGame {
     this.currentUpgradeChoices = available.slice(0, 3);
     this.renderUpgradeChoices();
     this.hud.upgradePanel.classList.add("is-visible");
-    if (this.gameState === "playing") this.transitionTo("levelUpPaused");
   }
 
   private renderUpgradeChoices() {
@@ -1810,13 +1808,23 @@ class OfficeEscapeGame {
         <span class="upgrade-level">Lv ${currentLevel} → Lv ${currentLevel + 1}</span>
         <span class="upgrade-description">${definition.descriptions[currentLevel]}</span>
       `;
-      button.addEventListener("click", () => this.selectWeaponUpgrade(id));
+      let handledByTouch = false;
+      // A second touch can suppress click while the movement joystick is held.
+      button.addEventListener("pointerup", (event) => {
+        if (event.pointerType !== "touch") return;
+        event.preventDefault();
+        handledByTouch = true;
+        this.selectWeaponUpgrade(id);
+      });
+      button.addEventListener("click", () => {
+        if (!handledByTouch) this.selectWeaponUpgrade(id);
+      });
       this.hud.upgradeOptions.append(button);
     }
   }
 
   private selectWeaponUpgrade(id: WeaponUpgradeId) {
-    if (this.gameState !== "levelUpPaused" || !this.currentUpgradeChoices.includes(id)) return;
+    if (this.gameState !== "playing" || !this.currentUpgradeChoices.includes(id)) return;
     this.weaponUpgradeLevels[id] = Math.min(5, this.weaponUpgradeLevels[id] + 1);
     this.weapon.applyStats(getWeaponRuntimeStats(this.weaponUpgradeLevels));
     this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
@@ -1833,11 +1841,10 @@ class OfficeEscapeGame {
   private closeUpgradePanel() {
     this.currentUpgradeChoices = [];
     this.hud.upgradePanel.classList.remove("is-visible");
-    if (this.gameState === "levelUpPaused") this.transitionTo("playing");
   }
 
   private onUpgradeKeyDown = (event: KeyboardEvent) => {
-    if (this.gameState !== "levelUpPaused") return;
+    if (this.gameState !== "playing" || this.currentUpgradeChoices.length === 0) return;
     const index = ["Digit1", "Digit2", "Digit3"].indexOf(event.code);
     if (index < 0 || index >= this.currentUpgradeChoices.length) return;
     event.preventDefault();
@@ -2131,6 +2138,7 @@ class OfficeEscapeGame {
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
     this.transitionTo(state);
+    this.closeUpgradePanel();
     this.hud.resultTitle.textContent = message;
     this.hud.resultTitle.style.color = color;
     this.hud.result.classList.add("is-visible");
@@ -2604,10 +2612,10 @@ class OfficeEscapeGame {
       <button class="fire-button" type="button" aria-label="射击" title="射击"><span class="fire-icon"></span></button>
       <button class="reload-button" type="button" aria-label="换弹" title="换弹">R</button>
       <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
-      <div class="upgrade-panel" role="dialog" aria-modal="true" aria-label="选择强化">
+      <div class="upgrade-panel" role="region" aria-label="选择强化">
         <div class="upgrade-box">
           <div class="upgrade-title">选择一项强化</div>
-          <div class="upgrade-subtitle">游戏已暂停</div>
+          <div class="upgrade-subtitle">战斗继续，随时点选</div>
           <div class="upgrade-options"></div>
         </div>
       </div>
