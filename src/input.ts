@@ -5,7 +5,7 @@ const JOYSTICK_EDGE_OVERFLOW = 10;
 const JOYSTICK_DEADZONE = 0.12;
 const JOYSTICK_WALK_LIMIT = 0.5;
 const JOYSTICK_JOG_LIMIT = 0.85;
-const JOYSTICK_JOG_SPEED = 1.3;
+const JOYSTICK_JOG_SPEED = 1.35;
 
 export const getJoystickSpeedMultiplier = (strength: number) => {
   if (strength <= JOYSTICK_DEADZONE) return 0;
@@ -231,8 +231,8 @@ export class InputController {
     this.joystickZ = strength > JOYSTICK_DEADZONE ? Math.sin(angle) : 0;
     this.joystickSpeedMultiplier = getJoystickSpeedMultiplier(strength);
     this.joystick.base.classList.toggle("is-jogging", this.joystickSpeedMultiplier >= 1.08
-      && this.joystickSpeedMultiplier < 1.35);
-    this.joystick.base.classList.toggle("is-running", this.joystickSpeedMultiplier >= 1.35);
+      && this.joystickSpeedMultiplier < 1.4);
+    this.joystick.base.classList.toggle("is-running", this.joystickSpeedMultiplier >= 1.4);
     this.joystick.knob.style.transform = `translate(calc(-50% + ${Math.cos(angle) * distance}px), calc(-50% + ${Math.sin(angle) * distance}px))`;
   }
 

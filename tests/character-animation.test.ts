@@ -9,8 +9,8 @@ const near = (actual: number, expected: number, message: string) => assert(Math.
 near(getJoystickSpeedMultiplier(0.12), 0, "Joystick deadzone");
 near(getJoystickSpeedMultiplier(0.13), 1, "Light joystick input starts at normal Walk speed");
 near(getJoystickSpeedMultiplier(0.5), 1, "Walk zone keeps its speed");
-near(getJoystickSpeedMultiplier(0.675), 1.15, "Middle joystick distance accelerates gradually");
-near(getJoystickSpeedMultiplier(0.85), 1.3, "Jog reaches its upper speed");
+near(getJoystickSpeedMultiplier(0.675), 1.175, "Middle joystick distance accelerates gradually");
+near(getJoystickSpeedMultiplier(0.85), 1.35, "Jog reaches its upper speed");
 near(getJoystickSpeedMultiplier(1), 1.5, "Outer joystick reaches full Run speed");
 const makeRig = (walkOnly = false) => {
   const root = new THREE.Group();

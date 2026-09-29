@@ -2,10 +2,11 @@ import * as THREE from "three";
 
 const SAMPLE_FPS = 30;
 const WALK_CYCLES = 3;
-const JOG_DURATION = 0.95;
-const RUN_POSE_WEIGHT = 0.5;
+const JOG_DURATION = 0.9;
+const RUN_LEG_WEIGHT = 0.7;
 const ARM_BONE = /^mixamorig(?:Left|Right)(?:Shoulder|Arm|ForeArm|Hand)/i;
 const TORSO_BONE = /^mixamorig(?:Spine|Neck|Head)/i;
+const HIPS_BONE = /^mixamorigHips(?:\.|$)/i;
 
 /** One gait cycle with blended leg motion and a stable rifle grip. */
 export function createRifleJogClip(walk: THREE.AnimationClip, run: THREE.AnimationClip) {
@@ -17,7 +18,8 @@ export function createRifleJogClip(walk: THREE.AnimationClip, run: THREE.Animati
   const runRotation = new THREE.Quaternion();
   const tracks = walk.tracks.map(walkTrack => {
     const poseWeight = ARM_BONE.test(walkTrack.name) ? 0
-      : TORSO_BONE.test(walkTrack.name) ? 0.25 : RUN_POSE_WEIGHT;
+      : TORSO_BONE.test(walkTrack.name) ? 0.35
+        : HIPS_BONE.test(walkTrack.name) ? 0.5 : RUN_LEG_WEIGHT;
     const runTrack = runTracks.get(walkTrack.name);
     const walkSampler = walkTrack.InterpolantFactoryMethodLinear();
     const runSampler = runTrack?.InterpolantFactoryMethodLinear();

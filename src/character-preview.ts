@@ -176,7 +176,7 @@ const applyTestMovement = () => {
   autoTransition.setAttribute("aria-pressed", String(autoEnabled));
   autoTransition.textContent = autoEnabled ? "停止自动流程" : "自动完整流程";
   transitionController?.setMovement(moving ? 1 : 0, 0);
-  transitionController?.setMovementSpeedScale(running ? PLAYER_CONFIG.maxRunSpeedMultiplier : jogging ? 1.2 : 1);
+  transitionController?.setMovementSpeedScale(running ? PLAYER_CONFIG.maxRunSpeedMultiplier : jogging ? 1.25 : 1);
   if (autoEnabled && phase >= 0.75 && autoShootSegment !== segment) {
     autoShootSegment = segment;
     transitionController?.playOneShot("shoot");

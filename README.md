@@ -52,7 +52,7 @@ http://localhost:6173/character-preview.html
 
 在「Idle / Walk / Jog / Run / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk；按住「按住小跑」按钮播放 Jog；按住空格加 Shift 或「按住跑步」按钮播放 Run，松开回 Idle；点按 F 播放单发 Shoot，按住 F 以游戏中的每 0.20 秒一发连续射击，跑步时自动切换为 `RifleRunShoot`；按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk／Jog／Run。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 RifleRun 时不显示跑步动作；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
 
-摇杆中心 12% 为死区；其外至半径 50% 固定为基础 Walk 速度，50%～85% 从 1.0 倍逐渐加速至 1.3 倍并进入 Jog，85%～100% 继续加速至最高 1.5 倍，在外圈进入 Run。`RifleJog` 在运行时由持枪 Walk／Run 混合生成，不增加 GLB 资源体积。
+摇杆中心 12% 为死区；其外至半径 50% 固定为基础 Walk 速度，50%～85% 从 1.0 倍逐渐加速至 1.35 倍并进入 Jog，85%～100% 继续加速至最高 1.5 倍，在外圈进入 Run。`RifleJog` 在运行时由持枪 Walk／Run 混合生成，腿部增加 Run 姿势占比并略微加快步频，握枪手臂保持稳定；不增加 GLB 资源体积。
 
 切换测试中的「播放 Reload」或 R 键按游戏基础换弹时间 1.30 秒播放；原始 Mixamo Reload 在单动作模式中仍保持约 3.30 秒，供检查源姿势和左腕。移动中换弹时腿部继续 Walk、Jog 或 Run，换弹结束回到当前移动状态。
 

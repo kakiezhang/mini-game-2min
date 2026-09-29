@@ -179,7 +179,7 @@ export class CharacterAnimationController {
 
   private movementLocomotion(): CharacterLocomotionState {
     if (this.actions.has("jog")) {
-      const runThreshold = this.locomotionState === "run" ? 1.3 : 1.35;
+      const runThreshold = this.locomotionState === "run" ? 1.35 : 1.4;
       if (this.actions.has("run") && this.movementSpeedScale >= runThreshold) return "run";
       const jogThreshold = this.locomotionState === "jog" || this.locomotionState === "run" ? 1.04 : 1.08;
       return this.movementSpeedScale >= jogThreshold ? "jog" : "walk";

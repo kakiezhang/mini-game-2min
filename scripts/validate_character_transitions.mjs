@@ -64,6 +64,10 @@ const runGait = gaitMetrics(rifleRun);
 assert.ok(rifleJogGait.maxFootSpread > rifleWalkGait.maxFootSpread
   && rifleJogGait.maxFootSpread < runGait.maxFootSpread,
 `RifleJog stride is outside Walk/Run range: ${JSON.stringify(rifleJogGait)}`);
+assert.ok(rifleJogGait.maxFootSpread > rifleWalkGait.maxFootSpread * 1.07,
+  'RifleJog legs still look too close to fast walking');
+assert.ok(rifleJogGait.minimum > rifleWalkGait.minimum + 0.003,
+  'RifleJog lacks visible foot lift');
 assert.ok(rifleJogGait.minimum >= rifleWalkGait.minimum - 0.01,
   `RifleJog foot sinks below Walk: ${rifleJogGait.minimum}`);
 const walkFootMinimum = rifleWalkGait.minimum;
@@ -92,6 +96,9 @@ const gaitPhase = (runController.getSnapshot().actions.find(action => action.sta
 runController.setMovementSpeedScale(1.2);
 runReference.setMovementSpeedScale(1.2);
 assert.equal(runController.getSnapshot().state, 'jog', 'Medium joystick distance must select RifleJog');
+runController.setMovementSpeedScale(1.35);
+runReference.setMovementSpeedScale(1.35);
+assert.equal(runController.getSnapshot().state, 'jog', 'Upper Jog speed must remain RifleJog');
 assert.ok(Math.abs(runController.getSnapshot().actions.find(action => action.state === 'jog').time
   / rifleJog.duration - gaitPhase) < 1e-6, 'Walk to Jog lost gait phase');
 runController.setMovementSpeedScale(1.5);
