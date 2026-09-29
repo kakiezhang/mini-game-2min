@@ -2111,14 +2111,15 @@ class OfficeEscapeGame {
   private refreshHud() {
     const remaining = Math.max(0, Math.ceil(GAME.duration - this.elapsed));
     this.hud.timer.textContent = `${remaining}`;
-    this.hud.hpText.textContent = `HP ${Math.ceil(this.playerState.hp)}/${this.playerState.maxHp}`;
+    this.hud.hpText.textContent = `${Math.ceil(this.playerState.hp)}/${this.playerState.maxHp}`;
     this.hud.level.textContent = `Lv ${this.playerState.level}`;
     this.hud.card.textContent = this.hasAccessCard ? "门禁卡" : "无卡";
     this.hud.hpBar.style.width = `${(this.playerState.hp / this.playerState.maxHp) * 100}%`;
+    this.hud.expText.textContent = `${this.playerState.exp}/${this.playerState.expToNext}`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
     this.hud.expTrack.classList.toggle("is-ready", this.upgradePending && this.currentUpgradeChoices.length > 0);
     const weapon = this.weapon.getSnapshot(this.elapsed);
-    this.hud.ammo.textContent = `${weapon.magazineAmmo} / ${weapon.reserveAmmo}`;
+    this.hud.ammo.textContent = `${weapon.magazineAmmo}/${weapon.reserveAmmo}`;
     this.hud.weaponStatus.textContent = weapon.isReloading ? "换弹中" : weapon.magazineAmmo === 0 ? "弹匣空" : "冲锋枪";
     this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
@@ -2613,13 +2614,12 @@ class OfficeEscapeGame {
       <div class="hud-panel">
         <div class="status-header"><div class="level">Lv 1</div><div class="card">无卡</div></div>
         <div class="health-row">
-          <div class="hp-label">HP 100/100</div>
-          <div class="hp-track"><div class="hp-fill"></div></div>
+          <div class="hp-track"><div class="hp-fill"></div><div class="hp-value">100/100</div></div>
         </div>
-        <div class="exp-track"><div class="exp-fill"></div></div>
+        <div class="exp-track"><div class="exp-fill"></div><div class="exp-value">0/20</div></div>
         <div class="weapon-panel">
           <div class="weapon-status">冲锋枪</div>
-          <div class="ammo">20 / 80</div>
+          <div class="ammo">20/80</div>
           <div class="reload-track"><div class="reload-fill"></div></div>
         </div>
       </div>
@@ -2663,8 +2663,9 @@ class OfficeEscapeGame {
     return {
       root,
       minimap: root.querySelector<HTMLCanvasElement>(".minimap-canvas")!,
-      hpText: root.querySelector<HTMLDivElement>(".hp-label")!,
+      hpText: root.querySelector<HTMLDivElement>(".hp-value")!,
       hpBar: root.querySelector<HTMLDivElement>(".hp-fill")!,
+      expText: root.querySelector<HTMLDivElement>(".exp-value")!,
       expBar: root.querySelector<HTMLDivElement>(".exp-fill")!,
       expTrack: root.querySelector<HTMLDivElement>(".exp-track")!,
       timer: root.querySelector<HTMLDivElement>(".timer")!,
