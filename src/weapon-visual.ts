@@ -3,7 +3,7 @@ import * as THREE from "three";
 export type HeldWeaponVisual = {
   weapon: THREE.Group;
   muzzleSocket: THREE.Object3D;
-  updatePose(shootWeight: number, reloadWeight?: number, reloadPhase?: number): void;
+  updatePose(shootWeight: number, reloadWeight?: number, reloadPhase?: number, runWeight?: number): void;
 };
 
 export function shouldShowPlayerSmg(actions: readonly { name: string; weight: number }[]) {
@@ -110,8 +110,9 @@ export function attachPlayerSmg(root: THREE.Object3D): HeldWeaponVisual {
   const leftPalm = new THREE.Vector3();
   const leftFinger = new THREE.Vector3();
   const magazineTarget = new THREE.Vector3();
-  const updatePose = (shootWeight: number, reloadWeight = 0, reloadPhase = 0) => {
+  const updatePose = (shootWeight: number, reloadWeight = 0, reloadPhase = 0, runWeight = 0) => {
     // The socket stays at the right palm. Idle/Walk use a lowered muzzle,
+    // Run and Shoot keep the barrel level with the ground.
     // Reload follows the finger's horizontal heading but damps its pitch:
     // Mixamo lifts the index finger almost vertically during the magazine
     // gesture, which would otherwise swing the entire gun across the face.
@@ -135,7 +136,7 @@ export function attachPlayerSmg(root: THREE.Object3D): HeldWeaponVisual {
         desiredGunRotation.slerp(reloadGunRotation, THREE.MathUtils.clamp(reloadWeight, 0, 1));
       }
     }
-    desiredGunRotation.slerp(AIMED_GUN_ROTATION, THREE.MathUtils.clamp(shootWeight, 0, 1));
+    desiredGunRotation.slerp(AIMED_GUN_ROTATION, THREE.MathUtils.clamp(shootWeight + runWeight, 0, 1));
     socket.quaternion.copy(handWorld).invert().multiply(rootWorld).multiply(desiredGunRotation);
 
     // Mixamo animates only the body. During the left-hand magazine gesture,

@@ -23,11 +23,54 @@ async function loadAsset(path) {
   }
   return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(JSON.stringify(json), '');
 }
-const asset = await loadAsset(new URL('../ksman_v3_walk_1k_meshopt.glb', import.meta.url));
-for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk', 'Reload']) {
+const asset = await loadAsset(process.env.CHARACTER_ASSET ?? new URL('../ksman_v3_walk_1k_meshopt.glb', import.meta.url));
+for (const name of ['Idle', 'Walk', 'Shoot', 'RifleIdle', 'RifleWalk', 'RifleRun', 'Reload']) {
   assert.ok(asset.animations.some(clip => clip.name === name), `Missing ${name} clip`);
 }
-const armedClips = { idle: /^RifleIdle$/i, walk: /^RifleWalk$/i, shoot: /^Shoot$/i, reload: /^Reload$/i };
+const armedClips = { idle: /^RifleIdle$/i, walk: /^RifleWalk$/i, run: /^RifleRun$/i, shoot: /^Shoot$/i, reload: /^Reload$/i };
+const rifleWalk = asset.animations.find(clip => clip.name === 'RifleWalk');
+const rifleRun = asset.animations.find(clip => clip.name === 'RifleRun');
+assert.ok(rifleRun.duration > 0.5 && rifleRun.duration < 1, `Unexpected Run duration: ${rifleRun.duration}`);
+assert.notDeepEqual(rifleRun.tracks.find(track => /Spine\.quaternion$/i.test(track.name))?.values,
+  rifleWalk.tracks.find(track => /Spine\.quaternion$/i.test(track.name))?.values,
+  'Imported Run must have its own pose');
+const lowestFoot = clip => {
+  const sampleRoot = clone(asset.scene);
+  const mixer = new THREE.AnimationMixer(sampleRoot);
+  mixer.clipAction(clip).play();
+  let minimum = Infinity;
+  for (let index = 0; index <= 60; index += 1) {
+    mixer.setTime((index / 60) * clip.duration);
+    sampleRoot.updateMatrixWorld(true);
+    for (const name of ['mixamorigLeftFoot', 'mixamorigRightFoot']) {
+      minimum = Math.min(minimum, sampleRoot.getObjectByName(name).getWorldPosition(new THREE.Vector3()).y);
+    }
+  }
+  return minimum;
+};
+const walkFootMinimum = lowestFoot(rifleWalk);
+const runFootMinimum = lowestFoot(rifleRun);
+const runController = new CharacterAnimationController(clone(asset.scene), asset.animations, {
+  clips: armedClips, shootUpperBodyOnly: true, shootPulseEndSeconds: 0.3,
+});
+runController.setMovement(1, 0);
+runController.update(0.2);
+const gaitPhase = runController.getSnapshot().actions.find(action => action.state === 'walk').time / rifleWalk.duration;
+runController.setMovementSpeedScale(1.5);
+assert.equal(runController.getSnapshot().state, 'run', 'Fast movement must select imported Run');
+assert.ok(Math.abs(runController.getSnapshot().actions.find(action => action.state === 'run').time / rifleRun.duration - gaitPhase) < 1e-6,
+  'Walk to Run lost normalized gait phase');
+runController.update(0.12);
+assert.ok(runController.playOneShot('shoot'), 'Running Shoot did not start');
+runController.update(0.31);
+assert.equal(runController.getSnapshot().state, 'run', 'Running Shoot did not return to Run');
+assert.ok(runController.playOneShot('reload', { durationSeconds: 1.3 }), 'Running Reload did not start');
+runController.update(1.3);
+assert.equal(runController.getSnapshot().state, 'run', 'Running Reload did not return to Run');
+runController.setMovementSpeedScale(1);
+assert.equal(runController.getSnapshot().state, 'walk', 'Slowing down did not return to Walk');
+runController.dispose();
+console.log(JSON.stringify({ test: 'runtime armed run', duration: rifleRun.duration, walkFootMinimum, runFootMinimum, gaitPhasePreserved: true, shootFallback: true, reloadFallback: true }));
 const root = clone(asset.scene);
 const controller = new CharacterAnimationController(root, asset.animations, { clips: { idle: /^idle$/i, walk: /^walk$/i, shoot: /^shoot$/i } });
 const bones = [];
@@ -322,6 +365,15 @@ assert.ok(weapon.visible, 'Armed RifleIdle incorrectly hides the gun');
 player.setMovement(1, 0);
 player.update(0.2);
 assert.ok(weapon.visible, 'Armed RifleWalk incorrectly hides the gun');
+player.setMovementSpeedScale(1.5);
+player.update(0.2);
+assert.equal(player.animation.getSnapshot().state, 'run', 'Player did not select RifleRun at full acceleration');
+assert.ok(weapon.visible, 'Armed RifleRun incorrectly hides the gun');
+const runForward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+  player.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+assert.ok(Math.abs(runForward.y) < 1e-4 && runForward.z > 0.999,
+  `RifleRun barrel is not level: ${runForward.toArray()}`);
+player.setMovementSpeedScale(1);
 player.setMovement(0, 0);
 player.update(0.2);
 assert.ok(rightHand.getObjectByName('weaponSocket')?.getObjectByName('heldSmg') === weapon,
@@ -332,6 +384,42 @@ const muzzleForward = () => new THREE.Vector3(0, 0, 1).applyQuaternion(
 const neutralDirection = muzzleForward();
 assert.ok(neutralDirection.z > 0.75 && neutralDirection.y < -0.25,
   `Idle gun should be lowered forward, not at the feet: ${neutralDirection.toArray()}`);
+const runSweep = new AnimatedCharacter(asset, config);
+runSweep.setMovement(1, 0);
+runSweep.setMovementSpeedScale(1.5);
+runSweep.update(0.06);
+const blendedRunForward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+  runSweep.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+assert.ok(blendedRunForward.y < -0.1 && blendedRunForward.y > -0.35,
+  `Idle to Run does not raise the barrel gradually: ${blendedRunForward.toArray()}`);
+runSweep.update(0.06);
+let maxRunMuzzleY = 0;
+let maxRunPalmToHandguard = 0;
+const runLeftHand = runSweep.root.getObjectByName('mixamorigLeftHand');
+const runLeftMiddle = runSweep.root.getObjectByName('mixamorigLeftHandMiddle1');
+const runGun = runSweep.root.getObjectByName('heldSmg');
+const runHandguard = runGun.getObjectByName('handguard');
+for (let frame = 0; frame < 60; frame++) {
+  runSweep.update(1 / 60);
+  const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+    runSweep.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+  maxRunMuzzleY = Math.max(maxRunMuzzleY, Math.abs(forward.y));
+  assert.ok(forward.z > 0.999, `RifleRun barrel turns away from travel: ${forward.toArray()}`);
+  const palm = runLeftHand.getWorldPosition(new THREE.Vector3())
+    .lerp(runLeftMiddle.getWorldPosition(new THREE.Vector3()), 0.5);
+  maxRunPalmToHandguard = Math.max(maxRunPalmToHandguard,
+    new THREE.Box3().setFromObject(runHandguard).distanceToPoint(palm));
+}
+assert.ok(maxRunMuzzleY < 1e-4, `RifleRun barrel tilts during its cycle: ${maxRunMuzzleY}`);
+assert.ok(maxRunPalmToHandguard < 3,
+  `RifleRun left hand floats away from the handguard: ${maxRunPalmToHandguard}`);
+runSweep.root.rotation.y = Math.PI / 2;
+runSweep.update(0);
+const turnedRunForward = new THREE.Vector3(0, 0, 1).applyQuaternion(
+  runSweep.muzzleSocket.getWorldQuaternion(new THREE.Quaternion()));
+assert.ok(turnedRunForward.x > 0.999 && Math.abs(turnedRunForward.y) < 1e-4,
+  `Turning while running tilts the barrel: ${turnedRunForward.toArray()}`);
+runSweep.dispose();
 const muzzleBeforeShoot = player.muzzleSocket.getWorldPosition(new THREE.Vector3());
 assert.ok(player.playOneShot('shoot'));
 player.update(0.1);
@@ -375,7 +463,7 @@ for (let frame = 0; frame < 180; frame++) { player.setMovement(frame % 10 < 5 ? 
 other.root.updateMatrixWorld(true);
 assert.ok(otherBone.matrixWorld.equals(otherPose), 'Game instances share mutable bone state');
 player.dispose(); other.dispose(); reloadPlayer.dispose(); unarmedPlayer.dispose(); controller.dispose();
-console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, zeroTimeShootError, lowerBodyPoseError, returnedArmPoseError, rapidShotPoseError, rapidShotCount, singlePulseDuration, height: 118, grounded: true, independent: true, shootFallback: true, shootStarts, maxShootTime }));
+console.log(JSON.stringify({ test: 'runtime player transitions', bones: bones.length, frames: 1200, zeroTimePoseError, zeroTimeShootError, lowerBodyPoseError, returnedArmPoseError, rapidShotPoseError, rapidShotCount, singlePulseDuration, maxRunMuzzleY, maxRunPalmToHandguard, height: 118, grounded: true, independent: true, shootFallback: true, shootStarts, maxShootTime }));
 
 // A 140-degree wrist deformation pinched the Shoot mesh. Guard against its
 // return in the compressed runtime asset, including interpolated half-frames.
@@ -430,7 +518,7 @@ baselineMixer?.stopAllAction();
 console.log(JSON.stringify({ test: 'Shoot wrist', samples: 81, maxWristAngle, baselineChecked: Boolean(baseline), maxJointPositionError, maxOtherBoneMatrixError }));
 
 // New armed locomotion must also keep the left wrist intact at subframes.
-for (const name of ['RifleIdle', 'RifleWalk', 'Reload']) {
+for (const name of ['RifleIdle', 'RifleWalk', 'RifleRun', 'Reload']) {
   const clip = asset.animations.find(candidate => candidate.name === name);
   const rig = clone(asset.scene);
   let armedSkin;
@@ -448,14 +536,26 @@ for (const name of ['RifleIdle', 'RifleWalk', 'Reload']) {
       rotation: bone.getWorldQuaternion(new THREE.Quaternion()),
     }));
   };
-  const first = capturePose(0), last = capturePose(clip.duration);
+  const first = capturePose(0), next = capturePose(1 / 30);
+  const previous = capturePose(clip.duration - 1 / 30), last = capturePose(clip.duration);
   let maxSeamPosition = 0, maxSeamAngle = 0;
+  let maxSeamVelocityDelta = 0, maxSeamAngularVelocityDelta = 0;
   first.forEach((pose, index) => {
     maxSeamPosition = Math.max(maxSeamPosition, pose.position.distanceTo(last[index].position));
     maxSeamAngle = Math.max(maxSeamAngle, THREE.MathUtils.radToDeg(pose.rotation.angleTo(last[index].rotation)));
+    maxSeamVelocityDelta = Math.max(maxSeamVelocityDelta, last[index].position.clone().sub(previous[index].position)
+      .distanceTo(next[index].position.clone().sub(pose.position)));
+    const incoming = previous[index].rotation.clone().invert().multiply(last[index].rotation);
+    const outgoing = pose.rotation.clone().invert().multiply(next[index].rotation);
+    maxSeamAngularVelocityDelta = Math.max(maxSeamAngularVelocityDelta,
+      THREE.MathUtils.radToDeg(incoming.angleTo(outgoing)));
   });
   assert.ok(maxSeamPosition < 0.02 && maxSeamAngle < 3,
     `${name} loop seam is discontinuous: ${maxSeamPosition} units, ${maxSeamAngle}°`);
+  if (name === 'RifleRun') {
+    assert.ok(maxSeamVelocityDelta < 0.03 && maxSeamAngularVelocityDelta < 4,
+      `RifleRun loop changes velocity abruptly: ${maxSeamVelocityDelta} units, ${maxSeamAngularVelocityDelta}°`);
+  }
   let maxAngle = 0;
   for (let frame = 0; frame <= 120; frame++) {
     mixer.setTime(clip.duration * frame / 120); rig.updateMatrixWorld(true);
@@ -466,5 +566,6 @@ for (const name of ['RifleIdle', 'RifleWalk', 'Reload']) {
   }
   assert.ok(maxAngle < 90, `${name} left wrist twist is excessive: ${maxAngle}`);
   mixer.stopAllAction(); mixer.uncacheRoot(rig);
-  console.log(JSON.stringify({ test: `${name} wrist and loop`, samples: 121, maxAngle, maxSeamPosition, maxSeamAngle }));
+  console.log(JSON.stringify({ test: `${name} wrist and loop`, samples: 121, maxAngle, maxSeamPosition, maxSeamAngle,
+    maxSeamVelocityDelta, maxSeamAngularVelocityDelta }));
 }

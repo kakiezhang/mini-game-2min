@@ -137,5 +137,37 @@ running.controller.setMovementSpeedScale(1.5);
 running.controller.update(0.1);
 const walkAfterRun = running.controller.getSnapshot().actions.find(action => action.state === "walk")!.time;
 near(walkAfterRun - walkBeforeRun, 0.15, "Faster movement advances Walk at matching speed");
-controller.dispose(); legacy.controller.dispose(); independent.controller.dispose(); reloadController.dispose(); running.controller.dispose();
+
+const runRoot = new THREE.Group();
+const runBone = new THREE.Bone();
+runBone.name = "testBone";
+runRoot.add(runBone);
+const runIdle = new THREE.AnimationClip("RifleIdle", 1, [new THREE.NumberKeyframeTrack("testBone.position[x]", [0, 1], [0, 0])]);
+const runWalk = new THREE.AnimationClip("RifleWalk", 1, [new THREE.NumberKeyframeTrack("testBone.position[x]", [0, 1], [0, 1])]);
+const runClip = new THREE.AnimationClip("RifleRun", 0.75, [new THREE.NumberKeyframeTrack("testBone.position[x]", [0, 0.75], [1, 2])]);
+const runShoot = new THREE.AnimationClip("Shoot", 0.3, [new THREE.NumberKeyframeTrack("testBone.position[x]", [0, 0.3], [1, 2])]);
+const runController = new CharacterAnimationController(runRoot, [runIdle, runWalk, runClip, runShoot], {
+  clips: { idle: "RifleIdle", walk: "RifleWalk", run: "RifleRun", shoot: "Shoot" },
+});
+runController.setMovement(1, 0);
+runController.update(0.2);
+const phaseBeforeRun = runController.getSnapshot().actions.find(action => action.state === "walk")!.time;
+runController.setMovementSpeedScale(1.5);
+assert(runController.getSnapshot().state === "run", "Running selects the imported Run clip");
+near(runController.getSnapshot().actions.find(action => action.state === "run")!.time, phaseBeforeRun * runClip.duration,
+  "Walk to Run preserves normalized gait phase across different clip lengths");
+runController.update(0.12);
+near(runController.getSnapshot().actions.find(action => action.state === "run")!.weight, 1,
+  "Run finishes blending in");
+assert(runController.playOneShot("shoot"), "Run can be interrupted by Shoot");
+runController.update(0.3);
+assert(runController.getSnapshot().state === "run", "Shoot returns to Run while running");
+runController.setMovementSpeedScale(1.1);
+assert(runController.getSnapshot().state === "run", "Small joystick changes do not flip Run back to Walk");
+runController.setMovementSpeedScale(1);
+assert(runController.getSnapshot().state === "walk", "Slowing down selects Walk");
+runController.setMovement(0, 0);
+assert(runController.getSnapshot().state === "idle", "Stopping after Run selects Idle");
+
+controller.dispose(); legacy.controller.dispose(); independent.controller.dispose(); reloadController.dispose(); running.controller.dispose(); runController.dispose();
 console.log("Character animation tests passed: initialization, blending, reversals, one-shots, fire cadence, reload interruption, fallback, independence.");

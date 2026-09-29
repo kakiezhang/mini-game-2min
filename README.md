@@ -48,13 +48,13 @@ http://localhost:6173/character-preview.html
 
 验收台默认加载仓库根目录下的 `ksman_v3_walk_1k_meshopt.glb`，支持旋转、缩放、播放暂停、逐帧拖动、播放速度、循环和骨骼显示；也可以直接拖入其他 `.glb` 文件进行对比。
 
-默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`、`Shoot` 和 `Reload` 六段动作。原始 `Idle`／`Walk` 是空手动作，预览时隐藏枪；持枪动作及 Shoot／Reload 显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
+默认主角模型包含原始 `Idle`／`Walk`、持枪 `RifleIdle`／`RifleWalk`／`RifleRun`、`Shoot` 和 `Reload` 七段源动作。摇杆推到外圈或按住 Shift 时使用导入的持枪跑步动作；Walk／Run 切换保持归一化步伐相位。跑步时枪管保持水平，走路和站立时枪口略向下。原始 `Idle`／`Walk` 是空手动作，预览时隐藏枪；持枪动作及 Shoot／Reload 显示随右手运动的低模冲锋枪。换弹时枪柄始终保持在右手挂点，枪管随右手食指的水平方向改变，并适度跟随抬手的俯仰变化，避免枪口持续朝下或在换弹中段竖起来。正式游戏和切换测试使用持枪 Idle／Walk／Run；单动作预览仍可选择原始 Idle／Walk 作为对照。预览其他主角 v3 GLB 时也会附加这把枪，其他角色不会。
 
-在「Idle / Walk / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk，松开回 Idle；按 F 播放单发 Shoot，按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
+在「Idle / Walk / Run / Shoot / Reload 切换测试」中，按住空格或「按住移动」按钮播放 Walk；按住空格加 Shift 或「按住跑步」按钮播放 Run，松开回 Idle；按 F 播放单发 Shoot，按 R 播放 Reload。两个一次性动作只作用于上半身，腿部继续当前 Idle／Walk／Run。自动流程每 3 秒交替站立与移动并触发 Shoot；可手动在射击后换弹，检查回到当前移动状态及弹匣离枪／回位。速度滑块影响动作与过渡，暂停后可观察混合权重。缺少完整 Idle／Walk 或 RifleIdle／RifleWalk 的模型禁用切换测试；缺少 RifleRun 时不显示跑步动作；缺少 Shoot／Reload 时对应按钮禁用。此模式复用游戏的 `CharacterAnimationController`，但不会模拟地图位移；最后仍需在关卡中验收。
 
-切换测试中的「播放 Reload」或 R 键按游戏基础换弹时间 1.30 秒播放；原始 Mixamo Reload 在单动作模式中仍保持约 3.30 秒，供检查源姿势和左腕。移动中换弹时腿部继续 Walk，换弹结束回到当前移动状态。
+切换测试中的「播放 Reload」或 R 键按游戏基础换弹时间 1.30 秒播放；原始 Mixamo Reload 在单动作模式中仍保持约 3.30 秒，供检查源姿势和左腕。移动中换弹时腿部继续 Walk 或 Run，换弹结束回到当前移动状态。
 
-`npm run test:animation` 检查初始姿势、权重归一化、中途反向切换、一次性 Shoot／Reload、移动时不被覆盖、结束后回退、快速重复射击、循环、单 Walk 模型兼容及实例独立性。`npm run build` 同时构建游戏和 `character-preview.html`。
+`npm run test:animation` 检查初始姿势、权重归一化、中途反向切换、Walk／Run 相位、一次性 Shoot／Reload、移动时不被覆盖、结束后回退、快速重复射击、循环、单 Walk 模型兼容及实例独立性。`npm run build` 同时构建游戏和 `character-preview.html`。
 
 主角的 Idle 使用原始 Mixamo 动画第 2–5 秒（30 FPS 下第 61–151 帧），重新计时为 0–3 秒。合并时根据同一帧的父子骨骼矩阵转换到基础骨架，逐帧核对姿态，不清零非根骨骼位移、不强制缩放。前 2.4 秒保留原动作，最后 0.6 秒（18 帧）用五次缓动接回开头的姿势和运动方向，使循环接缝连续，避免突然跳回或先停顿再启动；不对整段动作额外平滑。
 
@@ -69,6 +69,7 @@ http://localhost:6173/character-preview.html
   --clip Shoot=ksman_v3_shoot.fbx --clip-forearm-twist Shoot=Left:0.5 \
   --clip RifleIdle=ksman_v3_rifle_idle.fbx --clip-forearm-twist RifleIdle=Left:0.5 \
   --clip RifleWalk=ksman_v3_rifle_walk.fbx --clip-forearm-twist RifleWalk=Left:0.5 \
+  --clip RifleRun=ksman_v3_rifle_run.fbx --clip-loop-blend RifleRun=5 --clip-forearm-twist RifleRun=Left:0.5 \
   --clip Reload=ksman_v3_reload.fbx --clip-forearm-twist Reload=Left:0.5 --force
 npx --yes @gltf-transform/cli@4.5.0 optimize \
   ksman_v3_walk.glb ksman_v3_walk_1k_meshopt.glb \
@@ -76,9 +77,9 @@ npx --yes @gltf-transform/cli@4.5.0 optimize \
   --texture-compress webp --texture-size 1024
 ```
 
-这里保留动画采样精度，避免压缩步骤再次引入手指旋转误差；六段动作共用同一个模型与骨架。
+这里保留动画采样精度，避免压缩步骤再次引入手指旋转误差；七段动作共用同一个模型与骨架。`RifleRun` 源文件为 23 帧循环，最后 5 帧接回开头姿势和速度。
 
-Shoot 左手与前臂相对于绑定姿势的变形存在约 140° 扭转差；持枪 Idle／Walk 分别约 131°／108°，Reload 也有最高约 130° 的同类问题，会使线性蒙皮在腕部拧细。四个动作分别用 `--clip-forearm-twist ...=Left:0.5` 将一半扭转分摊到左前臂，再补偿手部局部变换，保持手掌／手指的世界姿势和所有关节位置。这个角度不是人体腕关节角度；再生成时应保留这些选项。
+Shoot 左手与前臂相对于绑定姿势的变形存在约 140° 扭转差；持枪 Idle／Walk／Run 分别约 131°／108°／137°，Reload 也有最高约 130° 的同类问题，会使线性蒙皮在腕部拧细。五个动作分别用 `--clip-forearm-twist ...=Left:0.5` 将一半扭转分摊到左前臂，再补偿手部局部变换，保持手掌／手指的世界姿势和所有关节位置。这个角度不是人体腕关节角度；再生成时应保留这些选项。
 
 排查证据、修复原理、参数适用范围及前后对比方法记录在 [角色动画调优经验](docs/角色动画调优经验.md)。遇到手腕变细、扭转塌缩或类似“莲藕人”现象时可从这里开始排查。
 

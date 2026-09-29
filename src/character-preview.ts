@@ -4,6 +4,7 @@ import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js"
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { CharacterAnimationController } from "./characters/animation-controller.js";
 import { attachPlayerSmg, shouldShowPlayerSmg, type HeldWeaponVisual } from "./weapon-visual.js";
+import { PLAYER_CONFIG } from "./config.js";
 import "./character-preview.css";
 
 const DEFAULT_MODEL_URL = `${new URL("../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href}?preview=${Date.now()}`;
@@ -34,6 +35,7 @@ const singleControls = document.querySelector<HTMLElement>("#single-controls")!;
 const transitionControls = document.querySelector<HTMLElement>("#transition-controls")!;
 const modeHint = document.querySelector<HTMLElement>("#mode-hint")!;
 const holdMove = document.querySelector<HTMLButtonElement>("#hold-move")!;
+const holdRun = document.querySelector<HTMLButtonElement>("#hold-run")!;
 const shootAction = document.querySelector<HTMLButtonElement>("#shoot-action")!;
 const reloadAction = document.querySelector<HTMLButtonElement>("#reload-action")!;
 const autoTransition = document.querySelector<HTMLButtonElement>("#auto-transition")!;
@@ -44,6 +46,7 @@ const transitionStatus = document.querySelector<HTMLOutputElement>("#transition-
 const blendWeights = document.querySelector<HTMLOutputElement>("#blend-weights")!;
 const idleWeightBar = document.querySelector<HTMLElement>("#idle-weight-bar")!;
 const walkWeightBar = document.querySelector<HTMLElement>("#walk-weight-bar")!;
+const runWeightBar = document.querySelector<HTMLElement>("#run-weight-bar")!;
 const shootWeightBar = document.querySelector<HTMLElement>("#shoot-weight-bar")!;
 const reloadWeightBar = document.querySelector<HTMLElement>("#reload-weight-bar")!;
 
@@ -119,7 +122,9 @@ let playbackSpeed = 1;
 let transitionController: CharacterAnimationController | undefined;
 let reviewMode: "single" | "transition" = "single";
 let keyHeld = false;
+let shiftHeld = false;
 let heldPointer: number | undefined;
+let runPointer: number | undefined;
 let autoEnabled = false;
 let autoTime = 0;
 let autoShootSegment = -1;
@@ -131,16 +136,18 @@ const updateTransitionDisplay = () => {
   if (!snapshot) return;
   const idle = snapshot.actions.find(action => action.state === "idle");
   const walk = snapshot.actions.find(action => action.state === "walk");
+  const run = snapshot.actions.find(action => action.state === "run");
   const shoot = snapshot.actions.find(action => action.state === "shoot");
   const reload = snapshot.actions.find(action => action.state === "reload");
-  const labels = { idle: "Idle", walk: "Walk", shoot: "Shoot", reload: "Reload" } as const;
+  const labels = { idle: "Idle", walk: "Walk", run: "Run", shoot: "Shoot", reload: "Reload" } as const;
   transitionState.value = labels[snapshot.state as keyof typeof labels] ?? snapshot.state ?? "—";
   locomotionState.value = labels[snapshot.locomotionState];
   const statusLabel = transitionPaused ? "暂停" : snapshot.oneShotState ? "一次性动作" : snapshot.transitioning ? "混合中" : "稳定";
   transitionStatus.value = `${statusLabel} · ${snapshot.transitionDuration.toFixed(2)} s`;
-  blendWeights.value = `Idle ${Math.round((idle?.weight ?? 0) * 100)}% · Walk ${Math.round((walk?.weight ?? 0) * 100)}% · Shoot ${Math.round((shoot?.weight ?? 0) * 100)}% · Reload ${Math.round((reload?.weight ?? 0) * 100)}%`;
+  blendWeights.value = `Idle ${Math.round((idle?.weight ?? 0) * 100)}% · Walk ${Math.round((walk?.weight ?? 0) * 100)}% · Run ${Math.round((run?.weight ?? 0) * 100)}% · Shoot ${Math.round((shoot?.weight ?? 0) * 100)}% · Reload ${Math.round((reload?.weight ?? 0) * 100)}%`;
   idleWeightBar.style.width = `${(idle?.weight ?? 0) * 100}%`;
   walkWeightBar.style.width = `${(walk?.weight ?? 0) * 100}%`;
+  runWeightBar.style.width = `${(run?.weight ?? 0) * 100}%`;
   shootWeightBar.style.width = `${(shoot?.weight ?? 0) * 100}%`;
   reloadWeightBar.style.width = `${(reload?.weight ?? 0) * 100}%`;
   const active = snapshot.actions.find(action => action.state === snapshot.state);
@@ -150,13 +157,16 @@ const updateTransitionDisplay = () => {
 
 const applyTestMovement = () => {
   const held = keyHeld || heldPointer !== undefined;
+  const running = runPointer !== undefined || (keyHeld && shiftHeld);
   const segment = Math.floor(autoTime / 3);
   const phase = autoTime % 3;
-  const moving = held || (autoEnabled && segment % 2 === 1);
+  const moving = held || running || (autoEnabled && segment % 2 === 1);
   holdMove.setAttribute("aria-pressed", String(held));
+  holdRun.setAttribute("aria-pressed", String(running));
   autoTransition.setAttribute("aria-pressed", String(autoEnabled));
   autoTransition.textContent = autoEnabled ? "停止自动流程" : "自动完整流程";
   transitionController?.setMovement(moving ? 1 : 0, 0);
+  transitionController?.setMovementSpeedScale(running ? PLAYER_CONFIG.maxRunSpeedMultiplier : 1);
   if (autoEnabled && phase >= 0.75 && autoShootSegment !== segment) {
     autoShootSegment = segment;
     transitionController?.playOneShot("shoot");
@@ -166,9 +176,13 @@ const applyTestMovement = () => {
 
 const releaseTestInput = () => {
   keyHeld = false;
+  shiftHeld = false;
   const pointer = heldPointer;
   heldPointer = undefined;
   if (pointer !== undefined && holdMove.hasPointerCapture(pointer)) holdMove.releasePointerCapture(pointer);
+  const sprintPointer = runPointer;
+  runPointer = undefined;
+  if (sprintPointer !== undefined && holdRun.hasPointerCapture(sprintPointer)) holdRun.releasePointerCapture(sprintPointer);
   autoEnabled = false;
   autoTime = 0;
   autoShootSegment = -1;
@@ -291,6 +305,8 @@ const setReviewMode = (mode: "single" | "transition") => {
       clips: {
         idle: armedLocomotion ? /^RifleIdle$/i : /^Idle$/i,
         walk: armedLocomotion ? /^RifleWalk$/i : /^Walk$/i,
+        ...(armedLocomotion && activeGltf.animations.some(clip => /^RifleRun$/i.test(clip.name))
+          ? { run: /^RifleRun$/i } : {}),
         shoot: /^Shoot$/i,
         ...(reloadClip ? { reload: /^Reload$/i } : {}),
       },
@@ -300,7 +316,7 @@ const setReviewMode = (mode: "single" | "transition") => {
     transitionPaused = false;
     transitionPause.textContent = "暂停测试";
     modeHint.textContent = shootPulseEndSeconds
-      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
+      ? `与游戏共用控制器 · ${armedLocomotion ? "持枪 Idle／Walk／Run" : "Idle／Walk"} · Shoot 取前 0.30 秒 · Reload 按 1.30 秒播放`
       : shootUpperBodyOnly
         ? "与游戏共用控制器 · Shoot 只覆盖上半身，腿部继续 Idle／Walk"
         : "与游戏共用控制器 · 移动过渡 0.12 秒 · Shoot 过渡 0.08 秒";
@@ -414,6 +430,7 @@ const loadModel = async (url: string, name: string, revokeAfterLoad = false) => 
   playToggle.disabled = true;
   transitionModeButton.disabled = true;
   holdMove.disabled = true;
+  holdRun.disabled = true;
   autoTransition.disabled = true;
   shootAction.disabled = true;
   try {
@@ -431,6 +448,7 @@ const loadModel = async (url: string, name: string, revokeAfterLoad = false) => 
       transitionModeButton.disabled = !activeGltf || ![["idle", "walk"], ["rifleidle", "riflewalk"]].some(names =>
         names.every(name => activeGltf!.animations.some(clip => clip.name.toLowerCase() === name)));
       holdMove.disabled = transitionModeButton.disabled;
+      holdRun.disabled = transitionModeButton.disabled || !activeGltf?.animations.some(clip => clip.name.toLowerCase() === "riflerun");
       const hasShoot = Boolean(activeGltf?.animations.some(clip => clip.name.toLowerCase() === "shoot"));
       const hasReload = Boolean(activeGltf?.animations.some(clip => clip.name.toLowerCase() === "reload"));
       shootAction.disabled = transitionModeButton.disabled || !hasShoot;
@@ -472,6 +490,23 @@ holdMove.addEventListener("pointerup", releasePointer);
 holdMove.addEventListener("pointercancel", releasePointer);
 holdMove.addEventListener("lostpointercapture", releasePointer);
 holdMove.addEventListener("contextmenu", event => event.preventDefault());
+holdRun.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || runPointer !== undefined || reviewMode !== "transition" || holdRun.disabled) return;
+  event.preventDefault();
+  runPointer = event.pointerId;
+  holdRun.setPointerCapture(event.pointerId);
+  autoEnabled = false;
+  applyTestMovement();
+});
+const releaseRunPointer = (event: PointerEvent) => {
+  if (runPointer !== event.pointerId) return;
+  runPointer = undefined;
+  applyTestMovement();
+};
+holdRun.addEventListener("pointerup", releaseRunPointer);
+holdRun.addEventListener("pointercancel", releaseRunPointer);
+holdRun.addEventListener("lostpointercapture", releaseRunPointer);
+holdRun.addEventListener("contextmenu", event => event.preventDefault());
 autoTransition.addEventListener("click", () => {
   const enabled = !autoEnabled;
   releaseTestInput();
@@ -555,7 +590,7 @@ window.addEventListener("drop", (event) => {
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLElement && event.target.matches("input, select, textarea, [contenteditable=true]")) return;
   if (event.code === "Space") {
-    if (event.target instanceof HTMLButtonElement && event.target !== holdMove) return;
+    if (event.target instanceof HTMLButtonElement && event.target !== holdMove && event.target !== holdRun) return;
     event.preventDefault();
     if (event.repeat) return;
     if (reviewMode === "transition" && !holdMove.disabled) {
@@ -563,6 +598,9 @@ window.addEventListener("keydown", (event) => {
       autoEnabled = false;
       applyTestMovement();
     } else if (reviewMode === "single") playToggle.click();
+  } else if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
+    shiftHeld = true;
+    applyTestMovement();
   } else if (event.key.toLowerCase() === "r") {
     if (reviewMode === "transition" && !reloadAction.disabled) {
       event.preventDefault();
@@ -576,8 +614,9 @@ window.addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("keyup", event => {
-  if (event.code !== "Space") return;
-  keyHeld = false;
+  if (event.code === "Space") keyHeld = false;
+  else if (event.code === "ShiftLeft" || event.code === "ShiftRight") shiftHeld = false;
+  else return;
   applyTestMovement();
 });
 
@@ -625,11 +664,14 @@ renderer.setAnimationLoop(() => {
     const shootWeight = reviewMode === "transition"
       ? actions?.find(action => action.state === "shoot")?.weight ?? 0
       : activeClip?.name.toLowerCase() === "shoot" ? 1 : 0;
+    const runWeight = reviewMode === "transition"
+      ? actions?.find(action => action.state === "run")?.weight ?? 0
+      : activeClip?.name.toLowerCase() === "riflerun" ? 1 : 0;
     const reloadWeight = reviewMode === "transition" ? reload?.weight ?? 0
       : activeClip?.name.toLowerCase() === "reload" ? 1 : 0;
     const reloadPhase = reviewMode === "transition" ? reload ? reload.time / reload.duration : 0
       : activeClip?.name.toLowerCase() === "reload" ? (activeAction?.time ?? 0) / activeClip.duration : 0;
-    heldWeapon.updatePose(shootWeight, reloadWeight, reloadPhase);
+    heldWeapon.updatePose(shootWeight, reloadWeight, reloadPhase, runWeight);
   }
   controls.update();
   updateTimeDisplay();

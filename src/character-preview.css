@@ -170,6 +170,7 @@ h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
 .weight-bar span { display: block; height: 100%; transition: width .04s linear; }
 #idle-weight-bar { width: 100%; background: #6ee7c7; }
 #walk-weight-bar { width: 0; background: #719bdd; }
+#run-weight-bar { width: 0; background: #facc15; }
 #shoot-weight-bar { width: 0; background: #ffb454; }
 #reload-weight-bar { width: 0; background: #d1a4ff; }
 .transition-hint { margin: 10px 0 0; color: #8f9aa4; font-size: 11px; line-height: 1.6; }
@@ -269,7 +270,7 @@ input[type="range"] {
   .secondary-button { margin-left: 0; }
   #mode-hint { display: none; }
   .transition-actions { gap: 6px; flex-wrap: wrap; }
-  .hold-button { flex-basis: 100%; }
+  .hold-button { flex-basis: calc(50% - 3px); }
   .transition-actions .secondary-button, .shoot-button { flex: 1; min-height: 36px; }
   .blend-readout { grid-template-columns: .7fr .7fr 1fr; gap: 6px; }
   .blend-readout > div:last-child { grid-column: 1 / -1; }

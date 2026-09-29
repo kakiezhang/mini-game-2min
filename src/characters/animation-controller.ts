@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-export type CharacterLocomotionState = "idle" | "walk";
+export type CharacterLocomotionState = "idle" | "walk" | "run";
 export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death";
 export type CharacterAnimationState = CharacterLocomotionState | CharacterOneShotState;
 export type CharacterAnimationConfig = {
@@ -19,8 +19,15 @@ export const CHARACTER_TRANSITION_SECONDS = 0.12;
 export const CHARACTER_ACTION_TRANSITION_SECONDS = 0.08;
 
 const isLocomotionState = (state: CharacterAnimationState): state is CharacterLocomotionState => (
-  state === "idle" || state === "walk"
+  state === "idle" || state === "walk" || state === "run"
 );
+
+const findClip = (clips: THREE.AnimationClip[], matcher: string | RegExp | undefined) => clips.find(candidate => {
+  if (typeof matcher === "string") return candidate.name.toLowerCase() === matcher.toLowerCase();
+  if (!matcher) return false;
+  matcher.lastIndex = 0;
+  return matcher.test(candidate.name);
+});
 
 const upperBodyClips = (root: THREE.Object3D, clips: THREE.AnimationClip[]) => {
   let spine: THREE.Bone | undefined;
@@ -55,6 +62,8 @@ export class CharacterAnimationController {
   private activeAction?: THREE.AnimationAction;
   private state?: CharacterAnimationState;
   private locomotionState: CharacterLocomotionState = "idle";
+  private moving = false;
+  private movementSpeedScale = 1;
   private oneShotState?: CharacterOneShotState;
   private elapsed = CHARACTER_TRANSITION_SECONDS;
   private transitionDuration = CHARACTER_TRANSITION_SECONDS;
@@ -66,13 +75,13 @@ export class CharacterAnimationController {
       if (!config.clips.idle || !config.clips.walk || !config.clips.shoot) {
         throw new Error("Upper-body Shoot requires Idle, Walk, and Shoot clips");
       }
-      if (Object.keys(config.clips).some(state => !["idle", "walk", "shoot", "reload"].includes(state))) {
-        throw new Error("Upper-body actions currently support Idle, Walk, Shoot, and Reload");
+      if (Object.keys(config.clips).some(state => !["idle", "walk", "run", "shoot", "reload"].includes(state))) {
+        throw new Error("Upper-body actions currently support Idle, Walk, Run, Shoot, and Reload");
       }
       const maskedClips = upperBodyClips(root, clips);
       this.locomotionLayer = new CharacterAnimationController(root, clips, {
         ...config,
-        clips: { idle: config.clips.idle, walk: config.clips.walk },
+        clips: { idle: config.clips.idle, walk: config.clips.walk, run: config.clips.run },
         shootUpperBodyOnly: false,
       });
       clips = maskedClips;
@@ -82,12 +91,7 @@ export class CharacterAnimationController {
     this.animationSpeed = config.animationSpeed ?? 1;
     for (const state of Object.keys(config.clips) as CharacterAnimationState[]) {
       const matcher = config.clips[state];
-      const clip = clips.find(candidate => {
-        if (typeof matcher === "string") return candidate.name.toLowerCase() === matcher.toLowerCase();
-        if (!matcher) return false;
-        matcher.lastIndex = 0;
-        return matcher.test(candidate.name);
-      });
+      const clip = findClip(clips, matcher);
       if (!clip) continue;
       if (state === "shoot" && config.shootPulseEndSeconds !== undefined && (
         !Number.isFinite(config.shootPulseEndSeconds)
@@ -123,14 +127,24 @@ export class CharacterAnimationController {
   }
 
   setMovement(x: number, z: number) {
-    this.setLocomotion(Math.hypot(x, z) > 0.08 ? "walk" : "idle");
+    this.moving = Math.hypot(x, z) > 0.08;
+    this.setLocomotion(this.moving ? this.movementLocomotion() : "idle");
   }
 
   setMovementSpeedScale(scale: number) {
     if (!Number.isFinite(scale) || scale <= 0) return;
-    this.locomotionLayer?.setMovementSpeedScale(scale);
-    const walk = this.actions.get("walk");
-    if (walk) walk.timeScale = this.animationSpeed * THREE.MathUtils.clamp(scale, 0.2, 2);
+    this.movementSpeedScale = THREE.MathUtils.clamp(scale, 0.2, 2);
+    this.locomotionLayer?.setMovementSpeedScale(this.movementSpeedScale);
+    for (const state of ["walk", "run"] as const) {
+      const action = this.actions.get(state);
+      if (action) action.timeScale = this.animationSpeed * this.movementSpeedScale;
+    }
+    if (this.moving) this.setLocomotion(this.movementLocomotion());
+  }
+
+  private movementLocomotion(): CharacterLocomotionState {
+    const threshold = this.locomotionState === "run" ? 1.06 : 1.16;
+    return this.actions.has("run") && this.movementSpeedScale >= threshold ? "run" : "walk";
   }
 
   setState(state: CharacterAnimationState) {
@@ -252,6 +266,12 @@ export class CharacterAnimationController {
     const action = this.actions.get(state);
     if (!action) return;
 
+    const changingGait = (state === "walk" && this.state === "run")
+      || (state === "run" && this.state === "walk");
+    if (changingGait && this.activeAction) {
+      action.time = (this.activeAction.time / this.activeAction.getClip().duration) * action.getClip().duration;
+    }
+
     action.enabled = true;
     action.play();
     action.paused = frozenIdle;
@@ -259,13 +279,13 @@ export class CharacterAnimationController {
     // The base layer owns Walk/Idle time. Never restart the masked upper-body
     // action when returning from Shoot: its arms must stay in phase with legs.
     this.activate(this.locomotionState, action, immediate ? 0 : CHARACTER_TRANSITION_SECONDS,
-      !frozenIdle && !this.locomotionLayer);
+      !frozenIdle && !this.locomotionLayer && !changingGait);
   }
 
   private syncLocomotionPhase() {
     if (!this.locomotionLayer) return;
     let poseChanged = false;
-    for (const state of ["idle", "walk"] as const) {
+    for (const state of ["idle", "walk", "run"] as const) {
       const source = this.locomotionLayer.actions.get(state);
       const target = this.actions.get(state);
       if (source && target && Math.abs(target.time - source.time) > 1e-6) {

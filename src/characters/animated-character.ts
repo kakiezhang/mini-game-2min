@@ -161,9 +161,10 @@ export class AnimatedCharacter implements CharacterVisual {
       const actions = this.animation.getSnapshot().actions;
       this.heldWeapon.weapon.visible = shouldShowPlayerSmg(actions);
       const shootWeight = actions.find(action => action.state === "shoot")?.weight ?? 0;
+      const runWeight = actions.find(action => action.state === "run")?.weight ?? 0;
       const reload = actions.find(action => action.state === "reload");
       this.heldWeapon.updatePose(shootWeight, reload?.weight ?? 0,
-        reload ? reload.time / reload.duration : 0);
+        reload ? reload.time / reload.duration : 0, runWeight);
     }
   }
 

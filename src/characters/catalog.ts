@@ -12,6 +12,7 @@ export const CHARACTER_MODELS = {
     clips: {
       idle: /^RifleIdle$/i,
       walk: /^RifleWalk$/i,
+      run: /^RifleRun$/i,
       shoot: /^Shoot$/i,
       reload: /^Reload$/i,
     },
