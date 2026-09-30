@@ -41,7 +41,7 @@ export const getExpToNext = (level: number) => {
 };
 
 export const COLORS = {
-  floor: 0xb8beb9,
+  floor: 0x929892,
   wall: 0xf0ede3,
   player: 0xf4f0da,
   playerAccent: 0x2fbf71,

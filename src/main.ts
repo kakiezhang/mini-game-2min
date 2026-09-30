@@ -283,24 +283,24 @@ class OfficeEscapeGame {
   }
 
   private createMap() {
-    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0xd1d5d0, 1, "concrete", 9, 9));
+    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0xaeb6ad, 1, "concrete", 9, 9));
     ground.position.set(MAP.width / 2, -4, MAP.depth / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
 
     const rooms = [
-      { x: 270, z: 280, w: 520, d: 540, color: 0xc1c1b9, style: "carpet" },
-      { x: 810, z: 280, w: 520, d: 540, color: 0xc9c0b7, style: "carpet" },
-      { x: 270, z: 840, w: 520, d: 540, color: 0xbac8c5, style: "tile" },
-      { x: 810, z: 840, w: 520, d: 540, color: 0xc2c8bd, style: "tile" },
-      { x: 540, z: 1420, w: 1040, d: 560, color: 0xb8c3c6, style: "concrete" },
-      { x: 1390, z: 280, w: 660, d: 540, color: 0xc2c1bd, style: "carpet" },
-      { x: 1390, z: 840, w: 660, d: 540, color: 0xbdc9c2, style: "tile" },
-      { x: 1390, z: 1420, w: 660, d: 560, color: 0xc6c5bd, style: "concrete" },
+      { x: 270, z: 280, w: 520, d: 540, color: 0x969a91, style: "carpet" },
+      { x: 810, z: 280, w: 520, d: 540, color: 0xa49b91, style: "carpet" },
+      { x: 270, z: 840, w: 520, d: 540, color: 0x91a4a0, style: "tile" },
+      { x: 810, z: 840, w: 520, d: 540, color: 0x9ca596, style: "tile" },
+      { x: 540, z: 1420, w: 1040, d: 560, color: 0x91a0a4, style: "concrete" },
+      { x: 1390, z: 280, w: 660, d: 540, color: 0x9b9b96, style: "carpet" },
+      { x: 1390, z: 840, w: 660, d: 540, color: 0x94a69b, style: "tile" },
+      { x: 1390, z: 1420, w: 660, d: 560, color: 0x9f9d93, style: "concrete" },
     ];
 
     for (const room of rooms) {
-      const floor = this.texturedBox(room.w, 6, room.d, this.surfaceMaterial(`room-${room.x}-${room.z}`, room.color, 0xd7dcd5, 1, room.style as SurfaceStyle, 4, 4));
+      const floor = this.texturedBox(room.w, 6, room.d, this.surfaceMaterial(`room-${room.x}-${room.z}`, room.color, 0xaeb6ad, 1, room.style as SurfaceStyle, 4, 4));
       floor.position.set(room.x, 1, room.z);
       floor.receiveShadow = true;
       this.scene.add(floor);
@@ -341,22 +341,24 @@ class OfficeEscapeGame {
     this.addDaylightDetails();
   }
 
-  private addWall(x: number, z: number, width: number, depth: number) {
+  private addWall(x: number, z: number, width: number, depth: number, withTrim = true) {
     const wall = this.texturedBox(width, 90, depth, this.surfaceMaterial("painted-wall", COLORS.wall, 0xffffff, 1, "wall", 2, 1));
     wall.position.set(x, 45, z);
     wall.castShadow = true;
     wall.receiveShadow = true;
     this.scene.add(wall);
-    // Extend trim past every wall face so vertical wall segments never share a coplanar surface with it.
-    const baseboard = this.box(width + 4, 8, depth + 4, 0xd3c6b5);
-    baseboard.position.set(x, 4, z);
-    baseboard.castShadow = false;
-    baseboard.receiveShadow = false;
-    const cap = this.box(width + 6, 4, depth + 6, 0xffffff);
-    cap.position.set(x, 90, z);
-    cap.castShadow = false;
-    cap.receiveShadow = false;
-    this.scene.add(baseboard, cap);
+    if (withTrim) {
+      // Extend trim past every wall face so vertical wall segments never share a coplanar surface with it.
+      const baseboard = this.box(width + 4, 8, depth + 4, 0xd3c6b5);
+      baseboard.position.set(x, 4, z);
+      baseboard.castShadow = false;
+      baseboard.receiveShadow = false;
+      const cap = this.box(width + 6, 4, depth + 6, 0xffffff);
+      cap.position.set(x, 90, z);
+      cap.castShadow = false;
+      cap.receiveShadow = false;
+      this.scene.add(baseboard, cap);
+    }
     this.navigation.addObstacle(x, z, width, depth);
   }
 
@@ -419,7 +421,8 @@ class OfficeEscapeGame {
   }
 
   private addWallFromLayout(layout: ElevatorBoxLayout) {
-    this.addWall(layout.x, layout.z, layout.width, layout.depth);
+    // Elevator frame pieces meet edge-to-edge; expanded wall trim would overlap the jambs and lintel.
+    this.addWall(layout.x, layout.z, layout.width, layout.depth, false);
   }
 
   private addChairs() {
@@ -1801,7 +1804,20 @@ class OfficeEscapeGame {
   private removeDeadEnemies() {
     const dead = this.enemies.filter((enemy) => enemy.hp <= 0);
     for (const enemy of dead) {
-      this.emitParticles(enemy.group.position.x, 34, enemy.group.position.z, ENEMY_CONFIG[enemy.kind].color, enemy.kind === "boss" ? 24 : 10, enemy.kind === "boss" ? 110 : 64);
+      const deathBurst = enemy.kind === "changeRequest"
+        ? { color: 0x2878e8, count: 16 }
+        : enemy.kind === "meeting"
+          ? { color: 0x8249df, count: 16 }
+          : undefined;
+      this.emitParticles(
+        enemy.group.position.x,
+        34,
+        enemy.group.position.z,
+        deathBurst?.color ?? ENEMY_CONFIG[enemy.kind].color,
+        deathBurst?.count ?? (enemy.kind === "boss" ? 24 : 10),
+        enemy.kind === "boss" ? 110 : 64,
+        deathBurst ? { minSize: 3.5, maxSize: 6.5, life: 0.62, toneMapped: false } : undefined,
+      );
       this.maybeDropAmmo(enemy);
       if (enemy.expReward > 0) {
         const gainedExp = this.gainExp(enemy.expReward);
@@ -2097,7 +2113,15 @@ class OfficeEscapeGame {
     return undefined;
   }
 
-  private emitParticles(x: number, y: number, z: number, color: number, count: number, spread: number) {
+  private emitParticles(
+    x: number,
+    y: number,
+    z: number,
+    color: number,
+    count: number,
+    spread: number,
+    style?: { minSize: number; maxSize: number; life: number; toneMapped: boolean },
+  ) {
     while (this.particles.length + count > MAX_ACTIVE_PARTICLES) {
       const oldest = this.particles.shift();
       if (oldest) this.disposeParticle(oldest);
@@ -2106,16 +2130,17 @@ class OfficeEscapeGame {
     for (let i = 0; i < count; i += 1) {
       const mesh = new THREE.Mesh(
         this.particleGeometry,
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false }),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false, toneMapped: style?.toneMapped ?? true }),
       );
-      const size = THREE.MathUtils.randFloat(2, 5);
+      const size = THREE.MathUtils.randFloat(style?.minSize ?? 2, style?.maxSize ?? 5);
       mesh.scale.setScalar(size);
       mesh.position.set(x, y, z);
       const angle = Math.random() * Math.PI * 2;
       const speed = THREE.MathUtils.randFloat(spread * 0.8, spread * 1.4);
       const velocity = new THREE.Vector3(Math.cos(angle) * speed, THREE.MathUtils.randFloat(40, 120), Math.sin(angle) * speed);
       this.scene.add(mesh);
-      this.particles.push({ mesh, velocity, size, life: 0.45, maxLife: 0.45 });
+      const life = style?.life ?? 0.45;
+      this.particles.push({ mesh, velocity, size, life, maxLife: life });
     }
   }
 
