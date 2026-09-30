@@ -34,7 +34,7 @@ import { NavigationWorld, type Obstacle } from "./navigation";
 import { GamePerformanceMonitor } from "./performance/game-performance-monitor";
 import { createDynamicPointLight } from "./performance/render-performance-profile";
 import { GameMinimap } from "./ui/game-minimap";
-import { WeaponSystem } from "./weapon";
+import { WeaponSystem, type WeaponSnapshot } from "./weapon";
 import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 import { ELEVATOR_FRAME_LAYOUT, type ElevatorBoxLayout } from "./elevator-layout";
 
@@ -1019,6 +1019,21 @@ class OfficeEscapeGame {
   private bindEvents() {
     window.addEventListener("resize", () => this.resize());
     window.addEventListener("keydown", this.onUpgradeKeyDown);
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !this.hud.statusDetails.hidden) this.closeStatusDetails(true);
+    });
+    this.hud.hudPanel.addEventListener("click", () => this.toggleStatusDetails());
+    this.hud.hudPanel.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      this.toggleStatusDetails();
+    });
+    this.hud.detailsClose.addEventListener("click", () => this.closeStatusDetails(true));
+    window.addEventListener("pointerdown", (event) => {
+      if (this.hud.statusDetails.hidden || this.hud.detailsCard.contains(event.target as Node)
+        || this.hud.hudPanel.contains(event.target as Node)) return;
+      this.closeStatusDetails();
+    }, true);
     this.app.addEventListener("dblclick", this.preventBrowserGesture);
     this.app.addEventListener("selectstart", this.preventBrowserGesture);
     this.app.addEventListener("gesturestart", this.preventBrowserGesture, { passive: false });
@@ -1861,6 +1876,7 @@ class OfficeEscapeGame {
       this.completeLevelUp();
       return;
     }
+    this.closeStatusDetails();
 
     for (let index = available.length - 1; index > 0; index -= 1) {
       const swapIndex = Math.floor(Math.random() * (index + 1));
@@ -2200,7 +2216,6 @@ class OfficeEscapeGame {
     this.hud.timer.textContent = `${remaining}`;
     this.hud.hpText.textContent = `${Math.ceil(this.playerState.hp)}/${this.playerState.maxHp}`;
     this.hud.level.textContent = `Lv ${this.playerState.level}`;
-    this.hud.card.textContent = this.hasAccessCard ? "门禁卡" : "无卡";
     this.hud.hpBar.style.width = `${(this.playerState.hp / this.playerState.maxHp) * 100}%`;
     this.hud.expText.textContent = `${this.playerState.exp}/${this.playerState.expToNext}`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
@@ -2216,13 +2231,52 @@ class OfficeEscapeGame {
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
     this.hud.weaponPanel.classList.toggle("is-low-ammo", weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
+    if (!this.hud.statusDetails.hidden) this.refreshStatusDetails(weapon);
 
     this.hud.root.classList.toggle("is-low-health", this.playerState.hp / this.playerState.maxHp <= 0.28);
     this.hud.alert.classList.toggle("is-visible", this.elapsed < this.bossAlertUntil);
   }
 
+  private toggleStatusDetails() {
+    if (!this.hud.statusDetails.hidden) {
+      this.closeStatusDetails(true);
+      return;
+    }
+    if (this.gameState !== "playing" || this.currentUpgradeChoices.length > 0) return;
+    this.hud.statusDetails.hidden = false;
+    this.hud.hudPanel.setAttribute("aria-expanded", "true");
+    this.refreshStatusDetails(this.weapon.getSnapshot(this.elapsed));
+    this.hud.detailsClose.focus();
+  }
+
+  private closeStatusDetails(restoreFocus = false) {
+    if (this.hud.statusDetails.hidden) return;
+    this.hud.statusDetails.hidden = true;
+    this.hud.hudPanel.setAttribute("aria-expanded", "false");
+    if (restoreFocus) this.hud.hudPanel.focus();
+  }
+
+  private refreshStatusDetails(weapon: WeaponSnapshot) {
+    const hp = Math.ceil(this.playerState.hp);
+    this.hud.detailHpText.textContent = `${hp}/${this.playerState.maxHp}`;
+    this.hud.detailHpBar.style.width = `${hp / this.playerState.maxHp * 100}%`;
+    this.hud.detailExpText.textContent = `${this.playerState.exp}/${this.playerState.expToNext}`;
+    this.hud.detailExpBar.style.width = `${this.playerState.exp / this.playerState.expToNext * 100}%`;
+    this.hud.detailLevel.textContent = `Lv ${this.playerState.level}`;
+
+    const investedPoints = this.weaponUpgradeLevels.firepowerCalibration + this.weaponUpgradeLevels.magazineManagement;
+    this.hud.detailSkillPoints.textContent = `已投入 ${investedPoints} 点`;
+    this.hud.detailFirepowerLevel.textContent = `Lv ${this.weaponUpgradeLevels.firepowerCalibration}/5`;
+    this.hud.detailMagazineLevel.textContent = `Lv ${this.weaponUpgradeLevels.magazineManagement}/5`;
+
+    const stats = getWeaponRuntimeStats(this.weaponUpgradeLevels);
+    this.hud.detailWeaponAmmo.textContent = `弹匣 ${weapon.magazineAmmo}/${weapon.magazineSize} 发 · 备用 ${weapon.reserveAmmo} 发`;
+    this.hud.detailWeaponStats.textContent = `伤害 ${Number(stats.damage.toFixed(1))} · 射速 ${Number(stats.fireRate.toFixed(1))}/秒 · 换弹 ${Number(stats.reloadTime.toFixed(2))} 秒`;
+  }
+
   private finishGame(state: "success" | "failed", message: string, color: string) {
     this.transitionTo(state);
+    this.closeStatusDetails();
     this.closeUpgradePanel();
     this.hud.resultTitle.textContent = message;
     this.hud.resultTitle.style.color = color;
@@ -2629,8 +2683,8 @@ class OfficeEscapeGame {
         <div class="timer">120</div>
         <div class="timer-caption">距离下班</div>
       </div>
-      <div class="hud-panel">
-        <div class="status-header"><div class="level">Lv 1</div><div class="card">无卡</div></div>
+      <div class="hud-panel" role="button" tabindex="0" aria-label="查看角色状态与强化技能" aria-expanded="false" aria-controls="status-details">
+        <div class="status-header"><div class="level">Lv 1</div><div class="skills-label">强化技能</div></div>
         <div class="health-row">
           <div class="hp-track"><div class="hp-fill"></div><div class="hp-value">100/100</div></div>
         </div>
@@ -2656,6 +2710,38 @@ class OfficeEscapeGame {
           </div>
           <div class="reload-track"><div class="reload-fill"></div></div>
         </div>
+      </div>
+      <div class="status-details" id="status-details" role="dialog" aria-label="角色状态与强化技能" hidden>
+        <section class="status-details-card">
+          <div class="status-details-header">
+            <div><div class="status-details-kicker">角色信息</div><h2>角色状态</h2></div>
+            <button class="status-details-close" type="button" aria-label="关闭角色状态">×</button>
+          </div>
+          <div class="status-detail-section">
+            <div class="status-detail-heading"><span>生命值</span><strong class="detail-hp-text">100/100</strong></div>
+            <div class="status-detail-track"><div class="status-detail-fill health detail-hp-fill"></div></div>
+          </div>
+          <div class="status-detail-section">
+            <div class="status-detail-heading"><span>经验值</span><strong class="detail-exp-text">0/20</strong></div>
+            <div class="status-detail-track"><div class="status-detail-fill experience detail-exp-fill"></div></div>
+            <div class="status-detail-note">当前等级 <span class="detail-level">Lv 1</span></div>
+          </div>
+          <div class="status-detail-section">
+            <div class="status-detail-heading"><span>强化技能点</span><strong class="detail-skill-points">已投入 0 点</strong></div>
+            <div class="status-detail-list">
+              <div><span>火力校准</span><strong class="detail-firepower-level">Lv 0/5</strong></div>
+              <div><span>弹匣管理</span><strong class="detail-magazine-level">Lv 0/5</strong></div>
+            </div>
+          </div>
+          <div class="status-detail-section">
+            <div class="status-detail-heading"><span>武器列表</span></div>
+            <div class="status-weapon-item">
+              <div class="status-weapon-heading"><strong>冲锋枪</strong><span>已装备</span></div>
+              <div class="detail-weapon-ammo">弹匣 20/20 发 · 备用 20 发</div>
+              <div class="detail-weapon-stats">伤害 18 · 射速 5/秒 · 换弹 1.3 秒</div>
+            </div>
+          </div>
+        </section>
       </div>
       <div class="mission-panel">
         <div class="mission-kicker">通关目标</div>
@@ -2702,7 +2788,20 @@ class OfficeEscapeGame {
       expTrack: root.querySelector<HTMLDivElement>(".exp-track")!,
       timer: root.querySelector<HTMLDivElement>(".timer")!,
       level: root.querySelector<HTMLDivElement>(".level")!,
-      card: root.querySelector<HTMLDivElement>(".card")!,
+      hudPanel: root.querySelector<HTMLDivElement>(".hud-panel")!,
+      statusDetails: root.querySelector<HTMLDivElement>(".status-details")!,
+      detailsCard: root.querySelector<HTMLElement>(".status-details-card")!,
+      detailsClose: root.querySelector<HTMLButtonElement>(".status-details-close")!,
+      detailHpText: root.querySelector<HTMLElement>(".detail-hp-text")!,
+      detailHpBar: root.querySelector<HTMLDivElement>(".detail-hp-fill")!,
+      detailExpText: root.querySelector<HTMLElement>(".detail-exp-text")!,
+      detailExpBar: root.querySelector<HTMLDivElement>(".detail-exp-fill")!,
+      detailLevel: root.querySelector<HTMLSpanElement>(".detail-level")!,
+      detailSkillPoints: root.querySelector<HTMLElement>(".detail-skill-points")!,
+      detailFirepowerLevel: root.querySelector<HTMLElement>(".detail-firepower-level")!,
+      detailMagazineLevel: root.querySelector<HTMLElement>(".detail-magazine-level")!,
+      detailWeaponAmmo: root.querySelector<HTMLDivElement>(".detail-weapon-ammo")!,
+      detailWeaponStats: root.querySelector<HTMLDivElement>(".detail-weapon-stats")!,
       missionPanel: root.querySelector<HTMLDivElement>(".mission-panel")!,
       alert: root.querySelector<HTMLDivElement>(".alert-banner")!,
       hint: root.querySelector<HTMLDivElement>(".hint")!,

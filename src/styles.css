@@ -80,6 +80,18 @@ canvas {
   background: linear-gradient(180deg, rgba(10, 15, 13, 0.55), rgba(8, 12, 10, 0.42));
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(3px);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.hud-panel:hover,
+.hud-panel[aria-expanded="true"] {
+  border-color: rgba(250, 204, 21, 0.6);
+}
+
+.hud-panel:focus-visible {
+  outline: 2px solid #facc15;
+  outline-offset: 2px;
 }
 
 .status-header,
@@ -218,10 +230,160 @@ canvas {
   font-weight: 800;
 }
 
-.card {
-  font-size: 13px;
+.skills-label {
+  font-size: 12px;
   font-weight: 800;
   color: #facc15;
+}
+
+.status-details {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(4, 9, 8, 0.48);
+  pointer-events: none;
+}
+
+.status-details[hidden] {
+  display: none;
+}
+
+.status-details-card {
+  width: min(100%, 480px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 17px 18px;
+  border: 1px solid rgba(234, 221, 173, 0.34);
+  border-radius: 14px;
+  background: rgba(13, 19, 17, 0.88);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(7px);
+  pointer-events: auto;
+}
+
+#app .status-details-card,
+#app .status-details-card * {
+  touch-action: pan-y;
+}
+
+.status-details-header,
+.status-detail-heading,
+.status-detail-list > div,
+.status-weapon-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.status-details-kicker {
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.status-details-header h2 {
+  margin: 2px 0 0;
+  color: #fff7d6;
+  font-size: 22px;
+}
+
+.status-details-close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid rgba(234, 221, 173, 0.35);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff7d6;
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.status-detail-section {
+  margin-top: 15px;
+}
+
+.status-detail-heading {
+  color: #dce8dd;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.status-detail-heading strong {
+  color: #fff7d6;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-detail-track {
+  height: 13px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(2, 6, 5, 0.72);
+}
+
+.status-detail-fill {
+  height: 100%;
+  transition: width 120ms linear;
+}
+
+.status-detail-fill.health {
+  background: linear-gradient(90deg, #f44949, #ff7a55);
+}
+
+.status-detail-fill.experience {
+  background: linear-gradient(90deg, #38bdf8, #bdefff);
+}
+
+.status-detail-note {
+  margin-top: 5px;
+  color: #9fb0a4;
+  font-size: 12px;
+}
+
+.status-detail-list,
+.status-weapon-item {
+  margin-top: 7px;
+  padding: 9px 11px;
+  border: 1px solid rgba(203, 213, 196, 0.22);
+  border-radius: 8px;
+  background: rgba(26, 37, 33, 0.56);
+}
+
+.status-detail-list > div + div {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(203, 213, 196, 0.14);
+}
+
+.status-detail-list,
+.status-weapon-item {
+  color: #d9e2d8;
+  font-size: 13px;
+}
+
+.status-detail-list strong,
+.status-weapon-heading span {
+  color: #7dd3fc;
+}
+
+.status-weapon-heading strong {
+  color: #fff7d6;
+  font-size: 15px;
+}
+
+.detail-weapon-ammo,
+.detail-weapon-stats {
+  margin-top: 5px;
+  font-size: 12px;
 }
 
 .minimap-panel {
@@ -891,7 +1053,7 @@ canvas {
     font-size: 16px;
   }
 
-  .card {
+  .skills-label {
     font-size: 11px;
   }
 
