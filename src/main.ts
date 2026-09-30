@@ -2206,8 +2206,12 @@ class OfficeEscapeGame {
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
     this.hud.expTrack.classList.toggle("is-ready", this.upgradePending && this.currentUpgradeChoices.length > 0);
     const weapon = this.weapon.getSnapshot(this.elapsed);
-    this.hud.ammo.textContent = `${weapon.magazineAmmo}/${weapon.reserveAmmo}`;
-    this.hud.weaponStatus.textContent = weapon.isReloading ? "换弹中" : weapon.magazineAmmo === 0 ? "弹匣空" : "冲锋枪";
+    const reserveMagazines = Math.ceil(weapon.reserveAmmo / weapon.magazineSize);
+    const lastMagazineAmmo = weapon.reserveAmmo === 0 ? 0 : (weapon.reserveAmmo - 1) % weapon.magazineSize + 1;
+    this.hud.loadedAmmo.textContent = `×${weapon.magazineAmmo}`;
+    this.hud.reserveMagazines.textContent = `×${reserveMagazines}`;
+    this.hud.magazineFill.style.transform = `scaleY(${lastMagazineAmmo / weapon.magazineSize})`;
+    this.hud.weaponPanel.setAttribute("aria-label", `冲锋枪，${weapon.isReloading ? "换弹中，" : ""}弹匣内 ${weapon.magazineAmmo}/${weapon.magazineSize} 发，备用 ${weapon.reserveAmmo} 发`);
     this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
@@ -2631,9 +2635,25 @@ class OfficeEscapeGame {
           <div class="hp-track"><div class="hp-fill"></div><div class="hp-value">100/100</div></div>
         </div>
         <div class="exp-track"><div class="exp-fill"></div><div class="exp-value">0/20</div></div>
-        <div class="weapon-panel">
-          <div class="weapon-status">冲锋枪</div>
-          <div class="ammo">20/20</div>
+        <div class="weapon-panel" role="group" aria-label="冲锋枪，弹匣内 20 发，备用 20 发">
+          <svg class="weapon-icon" viewBox="0 0 64 32" role="img" aria-label="冲锋枪">
+            <path fill="currentColor" d="M2 10h9l4 4h5V9h21l5-3h9v3h8v4h-8v3H43l-4 3h-9l-3 11h-9l2-11h-7l-4 5H2v-5h5l3-4H2z"/>
+            <path fill="#17221f" d="M25 12h15v3H25z"/>
+          </svg>
+          <div class="ammo-group loaded-ammo" aria-hidden="true">
+            <svg class="bullet-icon" viewBox="0 0 12 24" aria-hidden="true">
+              <path fill="currentColor" d="M3 7c0-3.8 1.2-6 3-6s3 2.2 3 6v13H3z"/>
+              <path fill="currentColor" d="M2 19h8v4H2z"/>
+            </svg>
+            <span class="ammo-count loaded-count">×20</span>
+          </div>
+          <div class="ammo-group reserve-ammo" aria-hidden="true">
+            <svg class="magazine-icon" viewBox="0 0 16 24" aria-hidden="true">
+              <path fill="none" stroke="currentColor" stroke-width="2" d="M2 2h12v4H2zM3 6h10v11c0 3-3 5-8 6l-2-3z"/>
+              <path class="magazine-fill" fill="currentColor" d="M5 8h6v9c0 2-1.5 3.2-6 4z"/>
+            </svg>
+            <span class="ammo-count reserve-count">×1</span>
+          </div>
           <div class="reload-track"><div class="reload-fill"></div></div>
         </div>
       </div>
@@ -2693,8 +2713,9 @@ class OfficeEscapeGame {
       joystickBase: root.querySelector<HTMLDivElement>(".joystick")!,
       joystickKnob: root.querySelector<HTMLDivElement>(".joystick-knob")!,
       weaponPanel: root.querySelector<HTMLDivElement>(".weapon-panel")!,
-      weaponStatus: root.querySelector<HTMLDivElement>(".weapon-status")!,
-      ammo: root.querySelector<HTMLDivElement>(".ammo")!,
+      loadedAmmo: root.querySelector<HTMLSpanElement>(".loaded-count")!,
+      reserveMagazines: root.querySelector<HTMLSpanElement>(".reserve-count")!,
+      magazineFill: root.querySelector<SVGPathElement>(".magazine-fill")!,
       reloadBar: root.querySelector<HTMLDivElement>(".reload-fill")!,
       fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
       reloadButton: root.querySelector<HTMLButtonElement>(".reload-button")!,
