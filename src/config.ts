@@ -41,8 +41,8 @@ export const getExpToNext = (level: number) => {
 };
 
 export const COLORS = {
-  floor: 0x29322f,
-  wall: 0x8a938a,
+  floor: 0xb8beb9,
+  wall: 0xf0ede3,
   player: 0xf4f0da,
   playerAccent: 0x2fbf71,
   weapon: 0x303941,
@@ -141,7 +141,7 @@ export const DEFAULT_WEAPON: WeaponConfig = {
   criticalChance: 0,
   criticalMultiplier: 1.8,
   magazineSize: 20,
-  initialReserveAmmo: 80,
+  initialReserveAmmo: 20,
   maxReserveAmmo: 120,
   reloadTime: 1.3,
 };

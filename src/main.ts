@@ -93,11 +93,6 @@ type AmmoPickup = {
 type GameState = "ready" | "playing" | "success" | "failed";
 type SurfaceStyle = "concrete" | "tile" | "carpet" | "wall" | "wood" | "metal" | "plastic" | "paper";
 const TEXTURE_URLS: Partial<Record<SurfaceStyle, string>> = {
-  concrete: new URL("./assets/textures/concrete.png", import.meta.url).href,
-  tile: new URL("./assets/textures/floor-tile.png", import.meta.url).href,
-  carpet: new URL("./assets/textures/carpet.png", import.meta.url).href,
-  wall: new URL("./assets/textures/wall.png", import.meta.url).href,
-  wood: new URL("./assets/textures/wood.png", import.meta.url).href,
   metal: new URL("./assets/textures/metal.png", import.meta.url).href,
 };
 
@@ -209,12 +204,12 @@ class OfficeEscapeGame {
 
   constructor() {
     this.app.innerHTML = "";
-    this.scene.background = new THREE.Color(0x17221f);
-    this.scene.fog = new THREE.Fog(0x17221f, 1120, 2850);
+    this.scene.background = new THREE.Color(0xdcecf3);
+    this.scene.fog = new THREE.Fog(0xdcecf3, 1500, 3400);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.38;
+    this.renderer.toneMappingExposure = 1.25;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.app.append(this.renderer.domElement, this.hud.root);
@@ -254,10 +249,10 @@ class OfficeEscapeGame {
   }
 
   private createLights() {
-    const ambient = new THREE.HemisphereLight(0xfff2d2, 0x1d302b, 0.82);
+    const ambient = new THREE.HemisphereLight(0xf5faff, 0xb8c6b8, 1.65);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffe4b0, 2.35);
+    const sun = new THREE.DirectionalLight(0xffefd6, 2.25);
     sun.position.set(-520, 980, 340);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -271,14 +266,14 @@ class OfficeEscapeGame {
     sun.shadow.camera.far = 2400;
     this.scene.add(sun);
 
-    const rim = new THREE.DirectionalLight(0xa6e7ff, 0.62);
+    const rim = new THREE.DirectionalLight(0xd4edff, 0.72);
     rim.position.set(740, 420, 1180);
     this.scene.add(rim);
 
-    this.addAreaLight(270, 280, 0xffd27a, 1.08);
-    this.addAreaLight(810, 840, 0xb9f5bf, 0.9);
-    this.addAreaLight(1390, 840, 0xb9f5bf, 0.9);
-    this.addAreaLight(540, 1440, 0x9fd0ff, 1.12);
+    this.addAreaLight(270, 280, 0xffead0, 0.55);
+    this.addAreaLight(810, 840, 0xffead0, 0.52);
+    this.addAreaLight(1390, 840, 0xe4f3ff, 0.5);
+    this.addAreaLight(540, 1440, 0xe4f3ff, 0.56);
   }
 
   private addAreaLight(x: number, z: number, color: number, intensity: number) {
@@ -288,24 +283,24 @@ class OfficeEscapeGame {
   }
 
   private createMap() {
-    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0x3d4942, 0.94, "concrete", 9, 9));
+    const ground = this.texturedBox(MAP.width, 8, MAP.depth, this.surfaceMaterial("foundation", COLORS.floor, 0xd1d5d0, 1, "concrete", 9, 9));
     ground.position.set(MAP.width / 2, -4, MAP.depth / 2);
     ground.receiveShadow = true;
     this.scene.add(ground);
 
     const rooms = [
-      { x: 270, z: 280, w: 520, d: 540, color: 0x33433d, style: "carpet" },
-      { x: 810, z: 280, w: 520, d: 540, color: 0x403936, style: "carpet" },
-      { x: 270, z: 840, w: 520, d: 540, color: 0x293f47, style: "tile" },
-      { x: 810, z: 840, w: 520, d: 540, color: 0x354635, style: "tile" },
-      { x: 540, z: 1420, w: 1040, d: 560, color: 0x313a44, style: "concrete" },
-      { x: 1390, z: 280, w: 660, d: 540, color: 0x3d3b45, style: "carpet" },
-      { x: 1390, z: 840, w: 660, d: 540, color: 0x304640, style: "tile" },
-      { x: 1390, z: 1420, w: 660, d: 560, color: 0x33434b, style: "concrete" },
+      { x: 270, z: 280, w: 520, d: 540, color: 0xc1c1b9, style: "carpet" },
+      { x: 810, z: 280, w: 520, d: 540, color: 0xc9c0b7, style: "carpet" },
+      { x: 270, z: 840, w: 520, d: 540, color: 0xbac8c5, style: "tile" },
+      { x: 810, z: 840, w: 520, d: 540, color: 0xc2c8bd, style: "tile" },
+      { x: 540, z: 1420, w: 1040, d: 560, color: 0xb8c3c6, style: "concrete" },
+      { x: 1390, z: 280, w: 660, d: 540, color: 0xc2c1bd, style: "carpet" },
+      { x: 1390, z: 840, w: 660, d: 540, color: 0xbdc9c2, style: "tile" },
+      { x: 1390, z: 1420, w: 660, d: 560, color: 0xc6c5bd, style: "concrete" },
     ];
 
     for (const room of rooms) {
-      const floor = this.texturedBox(room.w, 6, room.d, this.surfaceMaterial(`room-${room.x}-${room.z}`, room.color, 0x5f6a60, 0.94, room.style as SurfaceStyle, 4, 4));
+      const floor = this.texturedBox(room.w, 6, room.d, this.surfaceMaterial(`room-${room.x}-${room.z}`, room.color, 0xd7dcd5, 1, room.style as SurfaceStyle, 4, 4));
       floor.position.set(room.x, 1, room.z);
       floor.receiveShadow = true;
       this.scene.add(floor);
@@ -331,48 +326,69 @@ class OfficeEscapeGame {
     this.addWall(1220, 1120, 240, 24);
     this.addWall(1580, 1120, 240, 24);
 
-    this.addDesk(250, 770, 270, 70, 42, 0xa66f3f);
-    this.addDesk(260, 925, 240, 70, 42, 0xa66f3f);
-    this.addDesk(270, 280, 280, 118, 46, 0x9a6a42);
-    this.addDesk(820, 265, 260, 118, 54, 0x8f5a35);
-    this.addDesk(1390, 270, 250, 100, 48, 0x806449);
-    this.addDesk(1330, 760, 210, 72, 42, 0xa66f3f);
-    this.addDesk(1550, 910, 200, 72, 42, 0xa66f3f);
-    this.addDesk(1400, 1420, 210, 100, 38, 0x806449);
+    this.addDesk(250, 770, 270, 70, 42, 0xc59b6c);
+    this.addDesk(260, 925, 240, 70, 42, 0xc59b6c);
+    this.addDesk(270, 280, 280, 118, 46, 0xcbb28d);
+    this.addDesk(820, 265, 260, 118, 54, 0xb98b63);
+    this.addDesk(1390, 270, 250, 100, 48, 0xc6ad89);
+    this.addDesk(1330, 760, 210, 72, 42, 0xc59b6c);
+    this.addDesk(1550, 910, 200, 72, 42, 0xc59b6c);
+    this.addDesk(1400, 1420, 210, 100, 38, 0xc6ad89);
     this.addCoffeeMachine(825, 805);
     this.addElevatorDoor();
     this.addChairs();
     this.addSceneDressing();
-    this.addFloorNoise();
+    this.addDaylightDetails();
   }
 
   private addWall(x: number, z: number, width: number, depth: number) {
-    const wall = this.texturedBox(width, 90, depth, this.surfaceMaterial("painted-wall", COLORS.wall, 0xb2b8aa, 1, "wall", 2, 1));
+    const wall = this.texturedBox(width, 90, depth, this.surfaceMaterial("painted-wall", COLORS.wall, 0xffffff, 1, "wall", 2, 1));
     wall.position.set(x, 45, z);
     wall.castShadow = true;
     wall.receiveShadow = true;
     this.scene.add(wall);
+    // Extend trim past every wall face so vertical wall segments never share a coplanar surface with it.
+    const baseboard = this.box(width + 4, 8, depth + 4, 0xd3c6b5);
+    baseboard.position.set(x, 4, z);
+    baseboard.castShadow = false;
+    baseboard.receiveShadow = false;
+    const cap = this.box(width + 6, 4, depth + 6, 0xffffff);
+    cap.position.set(x, 90, z);
+    cap.castShadow = false;
+    cap.receiveShadow = false;
+    this.scene.add(baseboard, cap);
     this.navigation.addObstacle(x, z, width, depth);
   }
 
   private addDesk(x: number, z: number, width: number, depth: number, height: number, color: number) {
-    const top = this.texturedBox(width, height, depth, this.surfaceMaterial(`desk-${color.toString(16)}`, color, 0xd4a15f, 1, "wood", 3, 1));
-    top.position.set(x, height / 2, z);
-    top.castShadow = true;
-    top.receiveShadow = true;
+    const top = this.texturedBox(width, 7, depth, this.surfaceMaterial(`desk-${color.toString(16)}`, color, 0xe9cfaa, 1, "wood", 3, 1));
+    top.position.set(x, height - 3.5, z);
     this.scene.add(top);
+    const legMaterial = 0xe9e7dd;
+    for (const sideX of [-1, 1]) {
+      for (const sideZ of [-1, 1]) {
+        const leg = this.box(7, height - 7, 7, legMaterial);
+        leg.position.set(x + sideX * (width / 2 - 12), (height - 7) / 2, z + sideZ * (depth / 2 - 10));
+        this.scene.add(leg);
+      }
+    }
+    const modestyPanel = this.box(width * 0.68, height * 0.34, 4, 0xe6ddce);
+    modestyPanel.position.set(x, height * 0.64, z + depth / 2 - 7);
+    this.scene.add(modestyPanel);
     this.navigation.addObstacle(x, z, width, depth);
-
-    const highlight = this.box(width * 0.44, 3, depth * 0.12, 0xffe0a3, 0.26);
-    highlight.position.set(x - width * 0.18, height + 2, z - depth * 0.22);
-    this.scene.add(highlight);
   }
 
   private addCoffeeMachine(x: number, z: number) {
-    this.addDesk(x, z, 94, 94, 72, 0x9b6739);
-    const screen = this.box(48, 4, 28, 0x111816, 1);
-    screen.position.set(x, 74, z - 48);
-    this.scene.add(screen);
+    const counter = this.box(94, 68, 94, 0xe8e0d0);
+    counter.position.set(x, 34, z);
+    const top = this.texturedBox(100, 6, 100, this.surfaceMaterial("coffee-counter", 0xc8a17b, 0xe8caa5, 1, "wood"));
+    top.position.set(x, 71, z);
+    const machine = this.box(40, 32, 30, 0xf8f7f0);
+    machine.position.set(x, 90, z - 17);
+    const display = this.box(24, 12, 2, 0x70aab7);
+    display.position.set(x, 96, z - 33);
+    this.scene.add(counter, top, machine, display);
+    this.navigation.addObstacle(x, z, 94, 94);
   }
 
   private addElevatorDoor() {
@@ -420,24 +436,74 @@ class OfficeEscapeGame {
     ];
 
     for (const [x, z] of chairs) {
-      const chair = this.texturedBox(34, 32, 34, this.surfaceMaterial("chair-fabric", 0x38424b, 0x6f7d86, 1, "carpet", 1, 1));
-      chair.position.set(x, 16, z);
-      chair.castShadow = true;
-      chair.receiveShadow = true;
+      const chair = new THREE.Group();
+      const seat = this.mesh(new THREE.CylinderGeometry(19, 18, 7, 12), 0x728e91);
+      seat.position.y = 25;
+      const back = this.mesh(new THREE.BoxGeometry(34, 33, 7), 0x829da0);
+      back.position.set(0, 45, 15);
+      back.rotation.x = -0.1;
+      const post = this.mesh(new THREE.CylinderGeometry(3, 3, 20, 8), 0xb9c1bd);
+      post.position.y = 12;
+      const base = this.mesh(new THREE.CylinderGeometry(17, 18, 4, 10), 0x687b7a);
+      base.position.y = 3;
+      chair.add(seat, back, post, base);
+      chair.position.set(x, 0, z);
       this.scene.add(chair);
       this.navigation.addObstacle(x, z, 34, 34);
     }
   }
 
+  private addDaylightDetails() {
+    for (const x of [170, 450, 730, 1010, 1320, 1580]) {
+      this.addOfficeWindow(x, 0);
+      const sunPatch = new THREE.Mesh(
+        new THREE.PlaneGeometry(124, 160),
+        new THREE.MeshBasicMaterial({ color: 0xfff4d8, transparent: true, opacity: 0.12, depthWrite: false }),
+      );
+      sunPatch.rotation.x = -Math.PI / 2;
+      sunPatch.position.set(x + 34, 8.1, 132);
+      sunPatch.renderOrder = 2;
+      this.scene.add(sunPatch);
+    }
+    for (const [x, z] of [[270, 280], [810, 280], [270, 840], [810, 840], [1390, 280], [1390, 840], [540, 1420]] as const) {
+      this.addCeilingPanel(x, z);
+    }
+  }
+
+  private addOfficeWindow(x: number, z: number) {
+    const frame = this.box(146, 56, 5, 0xfaf8ef);
+    frame.position.set(x, 59, z + 14);
+    const glass = this.box(132, 42, 2, 0xa9d8e6);
+    glass.position.set(x, 60, z + 18);
+    glass.castShadow = false;
+    const divider = this.box(4, 42, 3, 0xfaf8ef);
+    divider.position.set(x, 60, z + 20);
+    const sill = this.box(154, 5, 15, 0xe9e4d8);
+    sill.position.set(x, 30, z + 18);
+    this.scene.add(frame, glass, divider, sill);
+  }
+
+  private addCeilingPanel(x: number, z: number) {
+    const housing = this.box(108, 4, 24, 0xe8e8df);
+    housing.position.set(x, 123, z);
+    housing.castShadow = false;
+    const diffuser = new THREE.Mesh(
+      new THREE.BoxGeometry(96, 2, 17),
+      new THREE.MeshBasicMaterial({ color: 0xfff8dc }),
+    );
+    diffuser.position.set(x, 126, z);
+    this.scene.add(housing, diffuser);
+  }
+
   private addSceneDressing() {
-    this.addZonePanel(270, 840, 430, 370, 0x1d4f5c, 0.16);
-    this.addZonePanel(270, 280, 410, 360, 0x5f4971, 0.14);
-    this.addZonePanel(810, 280, 420, 360, 0x6b3f2e, 0.14);
-    this.addZonePanel(810, 840, 410, 350, 0x315f3e, 0.15);
-    this.addZonePanel(540, 1420, 470, 270, 0x334b62, 0.16);
-    this.addZonePanel(1390, 280, 490, 350, 0x60516a, 0.14);
-    this.addZonePanel(1390, 840, 520, 380, 0x285954, 0.15);
-    this.addZonePanel(1390, 1420, 490, 290, 0x33576a, 0.15);
+    this.addZonePanel(270, 840, 430, 370, 0xbddad7, 0.09);
+    this.addZonePanel(270, 280, 410, 360, 0xd2c5df, 0.08);
+    this.addZonePanel(810, 280, 420, 360, 0xe8c9ad, 0.09);
+    this.addZonePanel(810, 840, 410, 350, 0xc7dfc3, 0.08);
+    this.addZonePanel(540, 1420, 470, 270, 0xc7dbe7, 0.08);
+    this.addZonePanel(1390, 280, 490, 350, 0xd8d0e3, 0.08);
+    this.addZonePanel(1390, 840, 520, 380, 0xc1ddd1, 0.08);
+    this.addZonePanel(1390, 1420, 490, 290, 0xc6d9df, 0.08);
 
     this.addFloorLabel(270, 610, "WORK", 0x8bdff2, 0.42);
     this.addFloorLabel(270, 95, "MEET", 0xd9b6ff, 0.38);
@@ -579,14 +645,14 @@ class OfficeEscapeGame {
   private addMeetingRoomDetails() {
     this.addWhiteboard(70, 270, Math.PI / 2);
     this.addProjector(270, 505);
-    this.addFloorDecal(270, 280, 92, 0x1f172a, 0.22);
+    this.addFloorDecal(270, 280, 92, 0xb8aed1, 0.1);
     this.addComputerSet(270, 250, 0, 0xd9b6ff);
     this.addPaperScatter(215, 350, 7);
     this.addPaperScatter(335, 240, 6);
   }
 
   private addBossOfficeDetails() {
-    this.addZonePanel(820, 265, 330, 190, 0x4a2516, 0.2);
+    this.addZonePanel(820, 265, 330, 190, 0xd5ad88, 0.1);
     this.addComputerSet(820, 220, 0, 0xffb86b);
     this.addDeskLamp(910, 245, 0xffd27a);
     this.addWallMarker(1030, 280, -Math.PI / 2, 0xffb86b);
@@ -598,7 +664,7 @@ class OfficeEscapeGame {
     this.addSupplyPad(450, 1000, 0x32d583);
     this.addSupplyPad(950, 450, 0x32d583);
     this.addVendingMachine(990, 820);
-    this.addFloorDecal(810, 840, 70, 0x10351f, 0.22);
+    this.addFloorDecal(810, 840, 70, 0xa9cdae, 0.1);
     this.addWallMarker(1030, 850, -Math.PI / 2, 0xa7f3c0);
   }
 
@@ -630,16 +696,16 @@ class OfficeEscapeGame {
 
   private addComputerSet(x: number, z: number, rotationY: number, glowColor: number) {
     const group = new THREE.Group();
-    const monitor = this.mesh(new THREE.BoxGeometry(38, 24, 5), 0x0c1114);
+    const monitor = this.mesh(new THREE.BoxGeometry(38, 24, 5), 0x657980);
     monitor.position.set(0, 28, -2);
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(30, 16),
-      new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.62, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.48, depthWrite: false }),
     );
     screen.position.set(0, 28, -5.2);
-    const stand = this.mesh(new THREE.BoxGeometry(6, 14, 6), 0x232d32);
+    const stand = this.mesh(new THREE.BoxGeometry(6, 14, 6), 0x8a9897);
     stand.position.set(0, 14, 0);
-    const keyboard = this.mesh(new THREE.BoxGeometry(36, 3, 13), 0x151b1f);
+    const keyboard = this.mesh(new THREE.BoxGeometry(36, 3, 13), 0xaab5af);
     keyboard.position.set(0, 7, 24);
     group.add(monitor, screen, stand, keyboard);
     group.position.set(x, 0, z);
@@ -757,13 +823,13 @@ class OfficeEscapeGame {
 
   private addLightStrip(x: number, z: number, length: number, rotationY: number, color: number) {
     const group = new THREE.Group();
-    const rail = this.mesh(new THREE.BoxGeometry(length, 5, 8), 0x1b2425);
+    const rail = this.mesh(new THREE.BoxGeometry(length, 5, 8), 0xe8e6dc);
     const glow = new THREE.Mesh(
       new THREE.BoxGeometry(length * 0.86, 3, 4),
       new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: 1.35,
+        emissiveIntensity: 0.65,
         roughness: 0.38,
         metalness: 0.05,
       }),
@@ -775,7 +841,7 @@ class OfficeEscapeGame {
     group.rotation.y = rotationY;
     this.scene.add(group);
 
-    const light = new THREE.PointLight(color, 0.55, 260, 1.75);
+    const light = new THREE.PointLight(color, 0.38, 260, 1.75);
     light.position.set(x, 112, z);
     this.scene.add(light);
   }
@@ -813,17 +879,24 @@ class OfficeEscapeGame {
 
   private addPottedPlant(x: number, z: number) {
     const group = new THREE.Group();
-    const pot = this.mesh(new THREE.CylinderGeometry(14, 18, 24, 8), 0x6b3f2e);
+    const pot = this.mesh(new THREE.CylinderGeometry(14, 18, 24, 16), 0xbe8061);
     pot.position.y = 12;
-    for (let index = 0; index < 5; index += 1) {
-      const leaf = this.mesh(new THREE.ConeGeometry(8, 42, 6), 0x4f8f5f);
-      const angle = (index / 5) * Math.PI * 2;
-      leaf.position.set(Math.cos(angle) * 8, 42, Math.sin(angle) * 8);
-      leaf.rotation.z = Math.cos(angle) * 0.45;
-      leaf.rotation.x = Math.sin(angle) * 0.45;
+    const soil = this.mesh(new THREE.CylinderGeometry(13, 13, 2, 16), 0x75543f);
+    soil.position.y = 24;
+    const stem = this.mesh(new THREE.CylinderGeometry(2, 3, 31, 8), 0x6c956c);
+    stem.position.y = 39;
+    const leafGeometry = new THREE.SphereGeometry(10, 12, 8);
+    const leafMaterial = new THREE.MeshStandardMaterial({ color: 0x65a97b, roughness: 0.9 });
+    for (let index = 0; index < 7; index += 1) {
+      const angle = (index / 7) * Math.PI * 2;
+      const leaf = this.meshWithMaterial(leafGeometry, leafMaterial);
+      leaf.scale.set(0.7, 1.5, 0.42);
+      leaf.position.set(Math.cos(angle) * 13, 49 + (index % 2) * 7, Math.sin(angle) * 13);
+      leaf.rotation.z = -Math.cos(angle) * 0.5;
+      leaf.rotation.x = Math.sin(angle) * 0.5;
       group.add(leaf);
     }
-    group.add(pot);
+    group.add(pot, soil, stem);
     group.position.set(x, 0, z);
     this.scene.add(group);
   }
@@ -844,27 +917,6 @@ class OfficeEscapeGame {
       paper.position.set(x + ((index * 37) % 94) - 47, 8.4, z + ((index * 53) % 76) - 38);
       paper.receiveShadow = true;
       this.scene.add(paper);
-    }
-  }
-
-  private addFloorNoise() {
-    const material = new THREE.MeshStandardMaterial({ color: 0xaeb7a9, transparent: true, opacity: 0.2, roughness: 1 });
-    const geometry = new THREE.BoxGeometry(6, 1, 3);
-    for (let i = 0; i < 180; i += 1) {
-      const mark = new THREE.Mesh(geometry, material);
-      mark.position.set(((i * 149) % (MAP.width - 90)) + 45, 5, ((i * 227) % (MAP.depth - 90)) + 45);
-      mark.rotation.y = (i % 8) * 0.31;
-      this.scene.add(mark);
-    }
-
-    for (let i = 0; i < 30; i += 1) {
-      this.addFloorDecal(
-        ((i * 193) % (MAP.width - 130)) + 65,
-        ((i * 281) % (MAP.depth - 150)) + 75,
-        THREE.MathUtils.randFloat(18, 42),
-        i % 3 === 0 ? 0x0c1110 : 0x596158,
-        i % 3 === 0 ? 0.18 : 0.12,
-      );
     }
   }
 
@@ -1035,6 +1087,7 @@ class OfficeEscapeGame {
     this.trySpawnEnemies();
     this.minimap.update(delta, this.playerState, this.enemies);
     this.updateCamera(delta);
+    for (const enemy of this.enemies) enemy.healthBar.quaternion.copy(this.camera.quaternion);
     this.updateCrosshair(input);
     this.updateObjectiveArrow();
     this.resolveGameResult();
@@ -1183,7 +1236,7 @@ class OfficeEscapeGame {
     const config = ENEMY_CONFIG[kind];
     const group = new THREE.Group();
     const healthBarWidth = kind === "boss" ? 86 : 48;
-    const healthBar = this.createEnemyHealthBar(healthBarWidth, kind === "boss" ? 0xff9f1c : config.color);
+    const healthBar = this.createEnemyHealthBar(healthBarWidth);
     const healthFill = healthBar.children[1] as THREE.Mesh;
     const animatedModel = ENEMY_CHARACTER_MODELS[kind];
     const visual = animatedModel
@@ -1268,7 +1321,7 @@ class OfficeEscapeGame {
     group.add(body, coat, head, snout, leftHorn, rightHorn, crown, tie, briefcase, rightArm, warning);
   }
 
-  private createEnemyHealthBar(width: number, color: number) {
+  private createEnemyHealthBar(width: number) {
     const group = new THREE.Group();
     const background = new THREE.Mesh(
       new THREE.PlaneGeometry(width + 7, 8),
@@ -1276,15 +1329,18 @@ class OfficeEscapeGame {
     );
     const fill = new THREE.Mesh(
       new THREE.PlaneGeometry(width, 4.5),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false }),
     );
     const shine = new THREE.Mesh(
       new THREE.PlaneGeometry(width, 1.4),
-      new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.32, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ color: 0xffd5d5, transparent: true, opacity: 0.26, depthWrite: false, toneMapped: false }),
     );
     fill.userData.width = width;
     fill.position.z = 0.2;
     shine.position.set(0, 1.1, 0.3);
+    background.renderOrder = 0;
+    fill.renderOrder = 1;
+    shine.renderOrder = 2;
     group.add(background, fill, shine);
     group.renderOrder = 40;
     group.visible = false;
@@ -1382,7 +1438,6 @@ class OfficeEscapeGame {
     const config = ENEMY_CONFIG[enemy.kind];
     const barHeight = config.height + (enemy.kind === "boss" ? 58 : 28);
     enemy.healthBar.position.set(enemy.group.position.x, barHeight, enemy.group.position.z);
-    enemy.healthBar.lookAt(this.camera.position);
 
     const healthRatio = THREE.MathUtils.clamp(enemy.hp / enemy.maxHp, 0, 1);
     const fillWidth = enemy.healthFill.userData.width as number;
@@ -2364,24 +2419,28 @@ class OfficeEscapeGame {
   }
 
   private drawConcretePattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
-    this.drawSpeckles(context, base, detail, rng, 640, 0.1);
-    context.globalAlpha = 0.12;
+    context.globalAlpha = 0.08;
     context.strokeStyle = this.colorToCss(detail);
-    for (let line = 0; line < 14; line += 1) {
+    context.lineWidth = 2;
+    for (let line = 0; line < 5; line += 1) {
       const x = rng() * 256;
       const y = rng() * 256;
       context.beginPath();
       context.moveTo(x, y);
-      context.lineTo(x + rng() * 86 - 43, y + rng() * 24 - 12);
+      context.lineTo(x + rng() * 70 - 35, y + rng() * 16 - 8);
       context.stroke();
     }
   }
 
   private drawTilePattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
-    const tile = 64;
-    context.globalAlpha = 0.4;
-    context.strokeStyle = "rgba(8, 12, 10, 0.52)";
-    context.lineWidth = 3;
+    const tile = 128;
+    context.globalAlpha = 0.12;
+    context.fillStyle = this.colorToCss(detail);
+    context.fillRect(0, 0, tile, tile);
+    context.fillRect(tile, tile, tile, tile);
+    context.globalAlpha = 0.22;
+    context.strokeStyle = this.colorToCss(base.clone().offsetHSL(0, 0, -0.13));
+    context.lineWidth = 2;
     for (let position = 0; position <= 256; position += tile) {
       context.beginPath();
       context.moveTo(position, 0);
@@ -2390,92 +2449,48 @@ class OfficeEscapeGame {
       context.lineTo(256, position);
       context.stroke();
     }
-    context.lineWidth = 1;
-    context.globalAlpha = 0.16;
-    context.strokeStyle = this.colorToCss(detail);
-    for (let position = tile / 2; position < 256; position += tile) {
-      context.beginPath();
-      context.moveTo(position, 0);
-      context.lineTo(position, 256);
-      context.moveTo(0, position);
-      context.lineTo(256, position);
-      context.stroke();
-    }
-    this.drawSpeckles(context, base, detail, rng, 360, 0.08);
   }
 
   private drawCarpetPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
-    this.drawSpeckles(context, base, detail, rng, 940, 0.08);
-    context.globalAlpha = 0.13;
+    context.globalAlpha = 0.1;
     context.strokeStyle = this.colorToCss(detail);
     context.lineWidth = 1;
-    for (let y = 0; y < 256; y += 6) {
+    for (let y = 0; y < 256; y += 16) {
       context.beginPath();
-      context.moveTo(0, y + rng() * 2);
-      context.lineTo(256, y + rng() * 2);
+      context.moveTo(0, y);
+      context.lineTo(256, y);
       context.stroke();
     }
-    context.globalAlpha = 0.08;
-    for (let x = 0; x < 256; x += 18) {
-      context.fillStyle = this.colorToCss(base.clone().offsetHSL(0, 0, rng() * 0.1 - 0.05));
-      context.fillRect(x, 0, 4, 256);
+    context.globalAlpha = 0.06;
+    for (let x = 0; x < 256; x += 20) {
+      context.fillStyle = this.colorToCss(base.clone().offsetHSL(0, 0, -0.08));
+      context.fillRect(x, 0, 2, 256);
     }
   }
 
   private drawWallPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
-    this.drawSpeckles(context, base, detail, rng, 380, 0.08);
-    context.globalAlpha = 0.2;
-    context.strokeStyle = "rgba(255, 247, 214, 0.35)";
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(0, 120);
-    context.lineTo(256, 120);
-    context.stroke();
-    context.globalAlpha = 0.16;
-    context.strokeStyle = this.colorToCss(detail);
-    for (let crack = 0; crack < 8; crack += 1) {
-      const x = rng() * 256;
-      const y = rng() * 256;
-      context.beginPath();
-      context.moveTo(x, y);
-      context.lineTo(x + rng() * 28 - 14, y + rng() * 44);
-      context.lineTo(x + rng() * 38 - 19, y + 32 + rng() * 40);
-      context.stroke();
-    }
-    context.globalAlpha = 0.1;
-    context.fillStyle = this.colorToCss(detail.clone().offsetHSL(0, -0.1, -0.12));
-    for (let stain = 0; stain < 9; stain += 1) {
-      context.beginPath();
-      context.ellipse(rng() * 256, rng() * 256, 8 + rng() * 24, 5 + rng() * 16, rng() * Math.PI, 0, Math.PI * 2);
-      context.fill();
-    }
+    context.globalAlpha = 0.08;
+    context.fillStyle = this.colorToCss(detail);
+    context.fillRect(0, 0, 256, 32);
   }
 
   private drawWoodPattern(context: CanvasRenderingContext2D, base: THREE.Color, detail: THREE.Color, rng: () => number) {
     const gradient = context.createLinearGradient(0, 0, 256, 0);
-    gradient.addColorStop(0, this.colorToCss(base.clone().offsetHSL(0, 0.04, -0.08)));
+    gradient.addColorStop(0, this.colorToCss(base.clone().offsetHSL(0, 0.02, -0.03)));
     gradient.addColorStop(0.5, this.colorToCss(base));
-    gradient.addColorStop(1, this.colorToCss(detail.clone().offsetHSL(0, -0.03, -0.04)));
+    gradient.addColorStop(1, this.colorToCss(detail.clone().offsetHSL(0, -0.03, -0.02)));
     context.globalAlpha = 1;
     context.fillStyle = gradient;
     context.fillRect(0, 0, 256, 256);
-    for (let y = 0; y < 256; y += 12) {
-      context.globalAlpha = 0.18 + rng() * 0.12;
-      context.strokeStyle = this.colorToCss(detail.clone().offsetHSL(0, 0, rng() * 0.14 - 0.12));
-      context.lineWidth = 2 + rng() * 3;
+    for (let y = 0; y < 256; y += 24) {
+      context.globalAlpha = 0.12 + rng() * 0.06;
+      context.strokeStyle = this.colorToCss(detail.clone().offsetHSL(0, 0, -0.08));
+      context.lineWidth = 1 + rng() * 2;
       context.beginPath();
-      context.moveTo(0, y + rng() * 6);
+      context.moveTo(0, y + rng() * 3);
       for (let x = 0; x <= 256; x += 32) {
-        context.lineTo(x, y + Math.sin(x * 0.035 + rng() * 2) * 7 + rng() * 5);
+        context.lineTo(x, y + Math.sin(x * 0.035 + rng()) * 3 + rng() * 2);
       }
-      context.stroke();
-    }
-    context.globalAlpha = 0.22;
-    for (let knot = 0; knot < 5; knot += 1) {
-      context.strokeStyle = this.colorToCss(detail.clone().offsetHSL(0, 0, -0.18));
-      context.lineWidth = 2;
-      context.beginPath();
-      context.ellipse(rng() * 256, rng() * 256, 10 + rng() * 16, 4 + rng() * 6, rng() * Math.PI, 0, Math.PI * 2);
       context.stroke();
     }
   }
@@ -2619,7 +2634,7 @@ class OfficeEscapeGame {
         <div class="exp-track"><div class="exp-fill"></div><div class="exp-value">0/20</div></div>
         <div class="weapon-panel">
           <div class="weapon-status">冲锋枪</div>
-          <div class="ammo">20/80</div>
+          <div class="ammo">20/20</div>
           <div class="reload-track"><div class="reload-fill"></div></div>
         </div>
       </div>
