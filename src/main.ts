@@ -508,14 +508,14 @@ class OfficeEscapeGame {
     this.addZonePanel(1390, 840, 520, 380, 0xc1ddd1, 0.08);
     this.addZonePanel(1390, 1420, 490, 290, 0xc6d9df, 0.08);
 
-    this.addFloorLabel(270, 610, "WORK", 0x8bdff2, 0.42);
-    this.addFloorLabel(270, 95, "MEET", 0xd9b6ff, 0.38);
-    this.addFloorLabel(810, 95, "BOSS", 0xffc08a, 0.4);
-    this.addFloorLabel(840, 610, "SUPPLY", 0xa7f3c0, 0.36);
-    this.addFloorLabel(540, 1320, "EXIT", 0xbdefff, 0.5);
-    this.addFloorLabel(1390, 95, "ARCHIVE", 0xd9b6ff, 0.35);
-    this.addFloorLabel(1390, 620, "WORK", 0x8bdff2, 0.4);
-    this.addFloorLabel(1390, 1210, "LOUNGE", 0xbdefff, 0.35);
+    this.addFloorLabel(270, 610, "工位区", 0x8bdff2, 0.58);
+    this.addFloorLabel(270, 95, "会议室", 0xd9b6ff, 0.56);
+    this.addFloorLabel(810, 95, "老板办公室", 0xffc08a, 0.58);
+    this.addFloorLabel(840, 610, "补给区", 0xa7f3c0, 0.54);
+    this.addFloorLabel(540, 1320, "电梯口", 0xbdefff, 0.64);
+    this.addFloorLabel(1390, 95, "档案室", 0xd9b6ff, 0.54);
+    this.addFloorLabel(1390, 620, "工位区", 0x8bdff2, 0.58);
+    this.addFloorLabel(1390, 1210, "休息区", 0xbdefff, 0.54);
 
     this.addGuideLine([
       [270, 840],
@@ -569,11 +569,16 @@ class OfficeEscapeGame {
 
   private addFloorLabel(x: number, z: number, text: string, color: number, opacity: number) {
     const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 96;
+    canvas.width = 384;
+    canvas.height = 128;
     const context = canvas.getContext("2d")!;
     context.clearRect(0, 0, canvas.width, canvas.height);
-    context.font = "800 50px Arial";
+    let fontSize = 78;
+    context.font = `900 ${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    while (context.measureText(text).width > canvas.width - 32 && fontSize > 54) {
+      fontSize -= 2;
+      context.font = `900 ${fontSize}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+    }
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillStyle = `#${new THREE.Color(color).getHexString()}`;
@@ -582,8 +587,9 @@ class OfficeEscapeGame {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     const label = new THREE.Mesh(
-      new THREE.PlaneGeometry(150, 56),
+      new THREE.PlaneGeometry(205, 68),
       new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 1, depthWrite: false }),
     );
     label.rotation.x = -Math.PI / 2;
@@ -2222,10 +2228,10 @@ class OfficeEscapeGame {
       return { title: "任务失败", body: "今日下班失败", meta: "FAILED" };
     }
     if (this.bossSpawned) {
-      return { title: "立即撤离", body: this.hasAccessCard ? "前往 EXIT 区域，坚持到进度完成" : "先拿门禁卡，再冲向电梯", meta: "BOSS" };
+      return { title: "立即撤离", body: this.hasAccessCard ? "前往电梯口，坚持到进度完成" : "先拿门禁卡，再冲向电梯", meta: "BOSS" };
     }
     if (this.elevatorOpen && this.hasAccessCard) {
-      return { title: "前往电梯", body: "跟随地面路线进入 EXIT 区域", meta: "EXIT OPEN" };
+      return { title: "前往电梯", body: "跟随地面路线进入电梯口", meta: "EXIT OPEN" };
     }
     if (this.elevatorOpen) {
       return { title: "缺少门禁卡", body: "先取得黄色光柱处的门禁卡", meta: "CARD NEEDED" };
@@ -2238,7 +2244,7 @@ class OfficeEscapeGame {
     }
     return {
       title: "拿门禁卡，乘电梯撤离",
-      body: "存活到电梯开放，进入 EXIT 区域完成撤离",
+      body: "存活到电梯开放，进入电梯口完成撤离",
       meta: "门禁卡 → 电梯 → 下班",
     };
   }
@@ -2666,7 +2672,7 @@ class OfficeEscapeGame {
       <div class="mission-panel">
         <div class="mission-kicker">通关目标</div>
         <div class="mission-title">拿门禁卡，乘电梯撤离</div>
-        <div class="mission-body">存活到电梯开放，进入 EXIT 区域完成撤离</div>
+        <div class="mission-body">存活到电梯开放，进入电梯口完成撤离</div>
         <div class="mission-meta">门禁卡 → 电梯 → 下班</div>
       </div>
       <div class="alert-banner">老板来了，立即撤离</div>
