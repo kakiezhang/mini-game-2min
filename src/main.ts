@@ -1408,9 +1408,11 @@ class OfficeEscapeGame {
 
       const movementLength = Math.hypot(moveX, moveZ);
       const length = Math.max(movementLength, 0.001);
+      const previousX = enemy.group.position.x;
+      const previousZ = enemy.group.position.z;
       const nextPosition = this.navigation.moveCircle(
-        enemy.group.position.x,
-        enemy.group.position.z,
+        previousX,
+        previousZ,
         (moveX / length) * enemy.speed * behavior.speedMultiplier * delta,
         (moveZ / length) * enemy.speed * behavior.speedMultiplier * delta,
         enemy.radius,
@@ -1427,7 +1429,9 @@ class OfficeEscapeGame {
         desiredVelocityZ: moveZ * behavior.speedMultiplier,
       }, ENEMY_CONFIG[enemy.kind].height);
       turnCharacterTowardMovement(enemy.group, moveX, moveZ, delta);
-      enemy.visual.setMovement(moveX * behavior.speedMultiplier, moveZ * behavior.speedMultiplier);
+      const actualVelocityX = (nextPosition.x - previousX) / Math.max(delta, 1e-6);
+      const actualVelocityZ = (nextPosition.z - previousZ) / Math.max(delta, 1e-6);
+      enemy.visual.setMovement(actualVelocityX, actualVelocityZ);
       enemy.visual.update(delta);
 
       const contactDistance = this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z);

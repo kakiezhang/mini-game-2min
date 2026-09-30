@@ -23,6 +23,7 @@ export const CHARACTER_MODELS = {
     url: new URL("../../bug_walk_1k_meshopt.glb", import.meta.url).href,
     height: 102,
     idlePose: 0.5,
+    walkStrideScale: 1.2,
     clips: {
       walk: /walk/i,
     },
@@ -31,6 +32,7 @@ export const CHARACTER_MODELS = {
     url: new URL("../../ppt_walk_1k_meshopt.glb", import.meta.url).href,
     height: 110,
     idlePose: 0.5,
+    walkStrideScale: 1.1,
     clips: {
       walk: /walk/i,
     },
@@ -39,6 +41,7 @@ export const CHARACTER_MODELS = {
     url: new URL("../../change_request_walk_1k_meshopt.glb", import.meta.url).href,
     height: 104,
     idlePose: 0.5,
+    walkStrideScale: 1.2,
     clips: {
       walk: /walk/i,
     },

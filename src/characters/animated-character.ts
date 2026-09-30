@@ -9,6 +9,7 @@ import {
   type CharacterAnimationState,
   type CharacterOneShotState,
 } from "./animation-controller.js";
+import { widenWalkStride } from "./walk-stride.js";
 
 export type { CharacterAnimationState } from "./animation-controller.js";
 
@@ -17,6 +18,7 @@ export type CharacterModelConfig = {
   height: number;
   facingOffset?: number;
   animationSpeed?: number;
+  walkStrideScale?: number;
   idlePose?: number;
   shootUpperBodyOnly?: boolean;
   shootPulseEndSeconds?: number;
@@ -222,7 +224,12 @@ export class CharacterAssetStore {
 
     const request = this.loader.loadAsync(config.url)
       .then((gltf: GLTF) => {
-        const asset = { scene: gltf.scene, animations: gltf.animations };
+        const strideScale = config.walkStrideScale;
+        const animations = strideScale
+          ? gltf.animations.map(clip => clip.name.toLowerCase() === "walk"
+            ? widenWalkStride(clip, strideScale) : clip)
+          : gltf.animations;
+        const asset = { scene: gltf.scene, animations };
         this.loaded.set(config.url, asset);
         this.pending.delete(config.url);
         return asset;
