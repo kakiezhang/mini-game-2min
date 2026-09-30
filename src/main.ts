@@ -2182,6 +2182,7 @@ class OfficeEscapeGame {
   }
 
   private showHint(message: string) {
+    this.hud.hint.classList.toggle("is-countdown", message === "距离下班还有 120 秒");
     this.hud.hint.textContent = message;
     this.hud.hint.classList.remove("is-fading");
     window.setTimeout(() => this.hud.hint.classList.add("is-fading"), 40);
@@ -2212,41 +2213,8 @@ class OfficeEscapeGame {
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
     this.hud.weaponPanel.classList.toggle("is-low-ammo", weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
 
-    const mission = this.getMissionStatus();
-    this.hud.missionTitle.textContent = mission.title;
-    this.hud.missionBody.textContent = mission.body;
-    this.hud.missionMeta.textContent = mission.meta;
     this.hud.root.classList.toggle("is-low-health", this.playerState.hp / this.playerState.maxHp <= 0.28);
     this.hud.alert.classList.toggle("is-visible", this.elapsed < this.bossAlertUntil);
-  }
-
-  private getMissionStatus() {
-    if (this.gameState === "success") {
-      return { title: "任务完成", body: "已成功撤离办公室", meta: "SAFE" };
-    }
-    if (this.gameState === "failed") {
-      return { title: "任务失败", body: "今日下班失败", meta: "FAILED" };
-    }
-    if (this.bossSpawned) {
-      return { title: "立即撤离", body: this.hasAccessCard ? "前往电梯口，坚持到进度完成" : "先拿门禁卡，再冲向电梯", meta: "BOSS" };
-    }
-    if (this.elevatorOpen && this.hasAccessCard) {
-      return { title: "前往电梯", body: "跟随地面路线进入电梯口", meta: "EXIT OPEN" };
-    }
-    if (this.elevatorOpen) {
-      return { title: "缺少门禁卡", body: "先取得黄色光柱处的门禁卡", meta: "CARD NEEDED" };
-    }
-    if (this.hasAccessCard) {
-      return { title: "等待电梯", body: `电梯将在 ${Math.max(0, Math.ceil(80 - this.elapsed))} 秒后开放`, meta: "HOLD" };
-    }
-    if (this.accessCard) {
-      return { title: "取得门禁卡", body: "前往黄色光柱处拾取门禁卡", meta: "CARD" };
-    }
-    return {
-      title: "拿门禁卡，乘电梯撤离",
-      body: "存活到电梯开放，进入电梯口完成撤离",
-      meta: "门禁卡 → 电梯 → 下班",
-    };
   }
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
@@ -2671,9 +2639,7 @@ class OfficeEscapeGame {
       </div>
       <div class="mission-panel">
         <div class="mission-kicker">通关目标</div>
-        <div class="mission-title">拿门禁卡，乘电梯撤离</div>
-        <div class="mission-body">存活到电梯开放，进入电梯口完成撤离</div>
-        <div class="mission-meta">门禁卡 → 电梯 → 下班</div>
+        <div class="mission-steps">拿到门禁卡 → 存活至电梯开门 → 乘坐电梯下班</div>
       </div>
       <div class="alert-banner">老板来了，立即撤离</div>
       <div class="hint">距离下班还有 120 秒</div>
@@ -2718,9 +2684,6 @@ class OfficeEscapeGame {
       level: root.querySelector<HTMLDivElement>(".level")!,
       card: root.querySelector<HTMLDivElement>(".card")!,
       missionPanel: root.querySelector<HTMLDivElement>(".mission-panel")!,
-      missionTitle: root.querySelector<HTMLDivElement>(".mission-title")!,
-      missionBody: root.querySelector<HTMLDivElement>(".mission-body")!,
-      missionMeta: root.querySelector<HTMLDivElement>(".mission-meta")!,
       alert: root.querySelector<HTMLDivElement>(".alert-banner")!,
       hint: root.querySelector<HTMLDivElement>(".hint")!,
       evac: root.querySelector<HTMLDivElement>(".evac")!,

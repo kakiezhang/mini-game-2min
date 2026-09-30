@@ -43,6 +43,7 @@ canvas {
   --corner-panel-size: 122px;
   --mobile-control-size: clamp(128px, 36vw, 144px);
   --mobile-control-inner-size: clamp(50px, 14vw, 56px);
+  --intro-popup-center-y: calc(max(16px, env(safe-area-inset-top)) + 116px);
 }
 
 .ui-root::before {
@@ -240,7 +241,7 @@ canvas {
 
 .mission-panel {
   position: absolute;
-  top: 50%;
+  top: var(--intro-popup-center-y);
   left: 50%;
   width: min(80vw, 420px);
   min-height: 96px;
@@ -256,34 +257,22 @@ canvas {
 }
 
 .mission-panel.is-intro-visible {
-  animation: objective-intro 2.5s ease-in forwards;
+  animation: objective-intro 3s ease-in 2s forwards;
 }
 
-.mission-kicker,
-.mission-meta {
+.mission-kicker {
   color: #7dd3fc;
   font-size: 11px;
   font-weight: 900;
 }
 
-.mission-title {
-  margin-top: 5px;
+.mission-steps {
+  margin-top: 12px;
   color: #fff7d6;
-  font-size: 21px;
-  font-weight: 900;
-}
-
-.mission-body {
-  margin-top: 4px;
-  color: #d9e2d8;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.mission-meta {
-  margin-top: 8px;
-  color: #facc15;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.5;
+  word-break: keep-all;
 }
 
 .alert-banner {
@@ -326,6 +315,20 @@ canvas {
   animation: hint-fade 2.1s ease forwards;
 }
 
+.hint.is-countdown {
+  top: var(--intro-popup-center-y);
+  font-size: 18px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  animation: countdown-intro 2s linear forwards;
+}
+
+@keyframes countdown-intro {
+  0%,
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 @keyframes hint-fade {
   0% {
     opacity: 1;
@@ -342,7 +345,7 @@ canvas {
 
 @keyframes objective-intro {
   0%,
-  80% {
+  90% {
     opacity: 1;
     visibility: visible;
     transform: translate(-50%, -50%);
@@ -837,6 +840,7 @@ canvas {
 @media (max-width: 520px) {
   .ui-root {
     --corner-panel-size: 104px;
+    --intro-popup-center-y: calc(max(16px, env(safe-area-inset-top)) + 202px);
   }
 
   .hud-panel {
@@ -877,17 +881,17 @@ canvas {
     padding: 10px 12px;
   }
 
-  .mission-title {
-    font-size: 18px;
-  }
-
-  .mission-body {
-    font-size: 13px;
+  .mission-steps {
+    font-size: clamp(12px, 3.4vw, 14px);
   }
 
   .hint {
     top: calc(max(16px, env(safe-area-inset-top)) + 184px);
     font-size: 18px;
+  }
+
+  .hint.is-countdown {
+    font-size: clamp(12px, 4vw, 16px);
   }
 
   .alert-banner {
