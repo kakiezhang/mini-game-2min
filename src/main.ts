@@ -39,6 +39,9 @@ import { WeaponSystem, type WeaponSnapshot } from "./weapon";
 import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 import { ELEVATOR_FRAME_LAYOUT, type ElevatorBoxLayout } from "./elevator-layout";
 import { chooseSupplyKind, pickSupplyPosition, type SupplyKind } from "./supplies";
+import { AttackLoadout, ATTACK_MODE_LABELS, type AttackMode } from "./attack-modes";
+import { MeleeSystem, type ActiveMelee } from "./melee";
+import { COMBAT_ICONS } from "./ui/combat-icons";
 
 type Enemy = {
   id: number;
@@ -154,9 +157,11 @@ class OfficeEscapeGame {
   private bulletVisuals: BulletVisual[] = [];
   private impactDecals: THREE.Mesh[] = [];
   private supplies: SupplyPickup[] = [];
-  private hasSmg = false;
+  private readonly loadout = new AttackLoadout();
+  private readonly melee = new MeleeSystem();
+  private get hasSmg() { return this.loadout.has("smg"); }
+  private get isArmed() { return this.loadout.current === "smg"; }
   private nextSupplyAt: number = SUPPLY_CONFIG.respawnInterval;
-  private nextUnarmedAttackAt = 0;
   private accessCard?: THREE.Group;
   private accessCardBeacon?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
@@ -225,6 +230,7 @@ class OfficeEscapeGame {
     this.minimap.update(0, this.playerState, this.enemies);
     const charactersReady = Promise.all([
       this.createPlayer(),
+      this.characterAssets.preload(CHARACTER_MODELS.player),
       this.characterAssets.preload(CHARACTER_MODELS.bug),
       this.characterAssets.preload(CHARACTER_MODELS.ppt),
       this.characterAssets.preload(CHARACTER_MODELS.changeRequest),
@@ -236,7 +242,11 @@ class OfficeEscapeGame {
     this.input = new InputController(this.renderer.domElement, this.camera, {
       base: this.hud.joystickBase,
       knob: this.hud.joystickKnob,
-    }, this.hud.fireButton, this.hud.reloadButton);
+    }, {
+      fire: this.hud.fireButton, punch: this.hud.punchButton, kick: this.hud.kickButton,
+      previous: this.hud.previousMode, next: this.hud.nextMode,
+    });
+    this.refreshAttackControls();
     this.bindEvents();
     this.showHint("正在加载角色模型…");
     this.resize();
@@ -1108,7 +1118,15 @@ class OfficeEscapeGame {
     this.spawnTimer -= delta;
     this.lastHintTimer -= delta;
 
-    const input = this.input!.getState(this.playerState.x, this.playerState.z);
+    let input = this.input!.getState(this.playerState.x, this.playerState.z);
+    if (input.modeStep) {
+      const mode = this.loadout.neighbor(input.modeStep);
+      if (mode && this.selectAttackMode(mode)) input = this.input!.getState(this.playerState.x, this.playerState.z);
+    }
+    for (const [button, charge] of [[this.hud.punchButton, input.punchCharge], [this.hud.kickButton, input.kickCharge]] as const) {
+      button.style.setProperty("--charge", `${charge * 360}deg`);
+      button.classList.toggle("is-charged", charge >= 1);
+    }
     this.updateTimeline();
     this.updatePlayer(delta, input);
     this.updateBulletVisuals(delta);
@@ -1142,7 +1160,7 @@ class OfficeEscapeGame {
     this.moveSpeedMultiplier = targetMultiplier <= 1
       ? targetMultiplier || 1
       : THREE.MathUtils.lerp(this.moveSpeedMultiplier, targetMultiplier, 1 - Math.exp(-delta * 10));
-    const speed = this.playerState.speed * slowMultiplier * this.moveSpeedMultiplier;
+    const speed = this.melee.active ? 0 : this.playerState.speed * slowMultiplier * this.moveSpeedMultiplier;
     const nextPosition = this.navigation.moveCircle(
       this.playerState.x,
       this.playerState.z,
@@ -1156,7 +1174,8 @@ class OfficeEscapeGame {
     // Keep the facing direction committed during the short Shoot windup so
     // a direction change before the firing frame cannot turn the gun away
     // from the shot that is already queued.
-    const facingAim = this.pendingShotAim ?? { x: input.aimX, z: input.aimZ };
+    const meleeAim = this.melee.active;
+    const facingAim = this.pendingShotAim ?? (meleeAim ? { x: meleeAim.aimX, z: meleeAim.aimZ } : { x: input.aimX, z: input.aimZ });
     this.player.rotation.y = Math.atan2(facingAim.x, facingAim.z);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
   }
@@ -1191,7 +1210,7 @@ class OfficeEscapeGame {
 
   private updatePlayerAnimation(delta: number, input: InputState) {
     if (!this.playerVisual) return;
-    this.playerVisual.setMovement(input.moveX, input.moveZ);
+    this.playerVisual.setMovement(this.melee.active ? 0 : input.moveX, this.melee.active ? 0 : input.moveZ);
     this.playerVisual.setMovementSpeedScale(this.moveSpeedMultiplier * (this.elapsed < this.slowUntil ? 0.7 : 1));
     this.playerVisual.update(delta);
   }
@@ -1508,11 +1527,11 @@ class OfficeEscapeGame {
   }
 
   private updateWeapon(input: InputState) {
-    if (!this.hasSmg) {
+    if (!this.isArmed) {
       this.updateUnarmedAttack(input);
       return undefined;
     }
-    const update = this.weapon.update(this.elapsed, input.fireHeld, input.reloadPressed);
+    const update = this.weapon.update(this.elapsed, input.fireHeld, false);
     let shotAim: { x: number; z: number } | undefined;
     if (update.reloadStarted) {
       this.pendingShotAim = undefined;
@@ -1541,26 +1560,30 @@ class OfficeEscapeGame {
   }
 
   private updateUnarmedAttack(input: InputState) {
-    if (!input.fireHeld || this.elapsed < this.nextUnarmedAttackAt) return;
-    this.nextUnarmedAttackAt = this.elapsed + 0.52;
-    this.resolveUnarmedAttack(input.aimX, input.aimZ);
+    for (const hit of this.melee.advance(this.elapsed)) this.resolveUnarmedAttack(hit);
+    for (const request of input.meleeRequests) this.melee.request(request, this.elapsed);
+    this.melee.startQueued(this.elapsed, input.aimX, input.aimZ,
+      move => this.playerVisual?.playOneShot(move.action, { durationSeconds: move.duration }) ?? false);
   }
 
-  private resolveUnarmedAttack(forwardX: number, forwardZ: number) {
-    const range = 74;
-    const target = this.enemies
+  private resolveUnarmedAttack(attack: ActiveMelee) {
+    const { aimX: forwardX, aimZ: forwardZ, move } = attack;
+    const range = move.range;
+    const targets = this.enemies
       .filter(enemy => enemy.hp > 0 && enemy.ai.state !== "spawning")
       .map(enemy => ({ enemy, distance: this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z) }))
       .filter(({ enemy, distance }) => {
         if (distance > range + enemy.radius || distance < 1) return false;
         const toEnemyX = (enemy.group.position.x - this.playerState.x) / distance;
         const toEnemyZ = (enemy.group.position.z - this.playerState.z) / distance;
-        if (toEnemyX * forwardX + toEnemyZ * forwardZ < 0.5) return false;
+        if (!move.sweep && toEnemyX * forwardX + toEnemyZ * forwardZ < 0.5) return false;
+        if (move.sweep && attack.hitTargets.has(enemy.id)) return false;
         return this.navigation.raycastObstacleDistance(
           this.playerState.x, this.playerState.z, toEnemyX, toEnemyZ, distance,
         ) >= distance - enemy.radius;
       })
-      .sort((first, second) => first.distance - second.distance)[0]?.enemy;
+      .sort((first, second) => first.distance - second.distance)
+      .slice(0, move.sweep ? undefined : 1).map(({ enemy }) => enemy);
 
     const swing = new THREE.Group();
     const arc = new THREE.Mesh(
@@ -1573,30 +1596,59 @@ class OfficeEscapeGame {
     swing.rotation.y = Math.atan2(forwardX, forwardZ);
     this.scene.add(swing);
     this.shotEffects.push({ object: swing, life: 0.13, maxLife: 0.13 });
-    if (!target) return;
-    target.hp -= 12;
-    target.hitFlashUntil = this.elapsed + 0.14;
-    this.enemyAi.notifyHit(target.ai, this.playerState.x, this.playerState.z, this.elapsed);
-    this.updateEnemyVisualState(target);
-    this.emitParticles(target.group.position.x, 30, target.group.position.z, 0xffd166, 5, 38);
+    for (const target of targets) {
+      target.hp -= move.damage;
+      attack.hitTargets.add(target.id);
+      target.hitFlashUntil = this.elapsed + 0.14;
+      this.enemyAi.notifyHit(target.ai, this.playerState.x, this.playerState.z, this.elapsed);
+      this.updateEnemyVisualState(target);
+      this.emitParticles(target.group.position.x, 30, target.group.position.z, 0xffd166, 5, 38);
+    }
     this.removeDeadEnemies();
   }
 
-  private equipSmg() {
-    if (this.hasSmg) return;
+  private selectAttackMode(mode: AttackMode) {
+    if (!this.loadout.select(mode)) return false;
+    this.input?.setAttackMode(mode);
+    this.weapon.holster();
+    this.pendingShotAim = undefined;
+    this.melee.cancel();
     const oldVisual = this.playerVisual;
     if (oldVisual) {
       oldVisual.dispose();
       this.player.remove(oldVisual.root);
       this.disposeObject(oldVisual.root);
     }
-    this.playerVisual = this.characterAssets.create(CHARACTER_MODELS.player, {
+    this.playerVisual = this.characterAssets.create(mode === "smg" ? CHARACTER_MODELS.player : CHARACTER_MODELS.playerUnarmed, {
       maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
     });
     this.player.add(this.playerVisual.root);
-    const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
-    this.playerVisual.muzzleSocket?.add(muzzleAccent);
-    this.hasSmg = true;
+    if (mode === "smg") {
+      const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
+      this.playerVisual.muzzleSocket?.add(muzzleAccent);
+    }
+    this.refreshAttackControls();
+    return true;
+  }
+
+  private refreshAttackControls() {
+    this.hud.root.classList.toggle("is-unarmed", !this.isArmed);
+    this.hud.fireButton.hidden = !this.isArmed;
+    this.hud.punchButton.hidden = this.isArmed;
+    this.hud.kickButton.hidden = this.isArmed;
+    this.hud.currentMode.innerHTML = (this.isArmed ? COMBAT_ICONS.smg : COMBAT_ICONS.punch)
+      + `<span>${ATTACK_MODE_LABELS[this.loadout.current]}</span>`;
+    this.hud.currentMode.setAttribute("aria-label", `当前攻击方式：${ATTACK_MODE_LABELS[this.loadout.current]}`);
+    for (const [button, direction] of [[this.hud.previousMode, -1], [this.hud.nextMode, 1]] as const) {
+      const mode = this.loadout.neighbor(direction);
+      button.disabled = mode === undefined;
+      button.innerHTML = mode ? mode === "smg" ? COMBAT_ICONS.smg : COMBAT_ICONS.punch : '<span aria-hidden="true">—</span>';
+      button.setAttribute("aria-label", mode ? `切换到${ATTACK_MODE_LABELS[mode]}` : "暂无可切换装备");
+      button.title = mode ? `切换到${ATTACK_MODE_LABELS[mode]}` : "拾取装备后可切换";
+    }
+    this.hud.controls.textContent = this.isArmed
+      ? "WASD / 方向键移动 · J / 左键射击 · 空弹匣自动换弹 · Q / E 切换方式"
+      : "WASD / 方向键移动 · J / 左键出拳 · K 踢腿 · 长按蓄力 · Q / E 切换方式";
   }
 
   private updateSupplies(delta: number) {
@@ -1621,8 +1673,9 @@ class OfficeEscapeGame {
       if (this.distanceToPlayer(pickup.group.position.x, pickup.group.position.z) > PLAYER_CONFIG.radius + pickup.radius) continue;
       if (pickup.kind === "smg") {
         if (this.hasSmg) continue;
-        this.equipSmg();
-        this.showFloating("冲锋枪已装备", "#ffe39a");
+        this.loadout.unlock("smg");
+        this.refreshAttackControls();
+        this.showFloating("拾到冲锋枪 · 点切换器使用", "#ffe39a");
       } else if (pickup.kind === "medkit") {
         const healed = Math.min(pickup.amount, this.playerState.maxHp - this.playerState.hp);
         if (healed <= 0) continue;
@@ -2306,25 +2359,19 @@ class OfficeEscapeGame {
     this.hud.expText.textContent = `${this.playerState.exp}/${this.playerState.expToNext}`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
     this.hud.expTrack.classList.toggle("is-ready", this.upgradePending && this.currentUpgradeChoices.length > 0);
-    this.hud.root.classList.toggle("is-unarmed", !this.hasSmg);
-    this.hud.fireButton.setAttribute("aria-label", this.hasSmg ? "射击" : "空手攻击");
-    this.hud.fireButton.title = this.hasSmg ? "射击" : "空手攻击";
-    this.hud.controls.textContent = this.hasSmg
-      ? "WASD / 方向键移动并转向 · J / 左键射击 · R 换弹"
-      : "WASD / 方向键移动并转向 · J / 左键空手攻击 · 拾取地上的冲锋枪后可射击";
     const weapon = this.weapon.getSnapshot(this.elapsed);
     const reserveMagazines = Math.ceil(weapon.reserveAmmo / weapon.magazineSize);
     const lastMagazineAmmo = weapon.reserveAmmo === 0 ? 0 : (weapon.reserveAmmo - 1) % weapon.magazineSize + 1;
     this.hud.loadedAmmo.textContent = `×${weapon.magazineAmmo}`;
     this.hud.reserveMagazines.textContent = `×${reserveMagazines}`;
     this.hud.magazineFill.style.transform = `scaleY(${lastMagazineAmmo / weapon.magazineSize})`;
-    this.hud.weaponPanel.setAttribute("aria-label", this.hasSmg
+    this.hud.weaponPanel.setAttribute("aria-label", this.isArmed
       ? `冲锋枪，${weapon.isReloading ? "换弹中，" : ""}弹匣内 ${weapon.magazineAmmo}/${weapon.magazineSize} 发，备用 ${weapon.reserveAmmo} 发`
       : "空手，靠近冲锋枪补给可拾取");
     this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
-    this.hud.weaponPanel.classList.toggle("is-low-ammo", this.hasSmg && weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
+    this.hud.weaponPanel.classList.toggle("is-low-ammo", this.isArmed && weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
     if (!this.hud.statusDetails.hidden) this.refreshStatusDetails(weapon);
 
     this.hud.root.classList.toggle("is-low-health", this.playerState.hp / this.playerState.maxHp <= 0.28);
@@ -2364,14 +2411,14 @@ class OfficeEscapeGame {
     this.hud.detailMagazineLevel.textContent = `Lv ${this.weaponUpgradeLevels.magazineManagement}/5`;
 
     const stats = getWeaponRuntimeStats(this.weaponUpgradeLevels);
-    this.hud.detailWeaponName.textContent = this.hasSmg ? "冲锋枪" : "空手";
-    this.hud.detailWeaponEquip.textContent = this.hasSmg ? "已装备" : "当前装备";
-    this.hud.detailWeaponAmmo.textContent = this.hasSmg
+    this.hud.detailWeaponName.textContent = this.isArmed ? "冲锋枪" : "空手";
+    this.hud.detailWeaponEquip.textContent = "当前使用";
+    this.hud.detailWeaponAmmo.textContent = this.isArmed
       ? `弹匣 ${weapon.magazineAmmo}/${weapon.magazineSize} 发 · 备用 ${weapon.reserveAmmo} 发`
-      : "靠近地上的枪可拾取 · 已拾弹药会保留";
-    this.hud.detailWeaponStats.textContent = this.hasSmg
+      : this.hasSmg ? "已拾取冲锋枪 · 点攻击方式切换器可使用" : "靠近地上的枪可拾取 · 已拾弹药会保留";
+    this.hud.detailWeaponStats.textContent = this.isArmed
       ? `伤害 ${Number(stats.damage.toFixed(1))} · 射速 ${Number(stats.fireRate.toFixed(1))}/秒 · 换弹 ${Number(stats.reloadTime.toFixed(2))} 秒`
-      : "空手攻击伤害 12 · 拳脚动作待接入";
+      : "每拳 12 · 蓄力勾拳 24 · 每踢 16 · 长按蓄力";
   }
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
@@ -2392,6 +2439,7 @@ class OfficeEscapeGame {
     }
     const isLevelEntry = this.gameState === "ready" && nextState === "playing";
     this.gameState = nextState;
+    this.input?.resetCombat();
     this.hud.root.dataset.gameState = nextState;
     if (isLevelEntry) this.hud.missionPanel.classList.add("is-intro-visible");
   }
@@ -2774,7 +2822,7 @@ class OfficeEscapeGame {
 
   private createHud() {
     const root = document.createElement("div");
-    root.className = "ui-root";
+    root.className = "ui-root is-unarmed";
     root.innerHTML = `
       <div class="minimap-panel">
         <canvas class="minimap-canvas" width="240" height="240" aria-label="实时地图"></canvas>
@@ -2854,9 +2902,19 @@ class OfficeEscapeGame {
       <div class="objective-arrow"></div>
       <div class="objective-label"></div>
       <div class="joystick"><div class="joystick-knob"></div></div>
-      <button class="fire-button" type="button" aria-label="射击" title="射击"><span class="fire-icon"></span></button>
-      <button class="reload-button" type="button" aria-label="换弹" title="换弹">R</button>
-      <div class="controls">WASD / 方向键移动并转向 · J / 左键射击 · R 换弹</div>
+      <div class="combat-controls">
+        <div class="attack-mode-selector" role="group" aria-label="攻击方式切换器">
+          <button class="mode-side mode-previous" type="button" aria-label="暂无可切换装备" disabled>—</button>
+          <div class="mode-current" role="status" aria-label="当前攻击方式：空手">${COMBAT_ICONS.punch}<span>空手</span></div>
+          <button class="mode-side mode-next" type="button" aria-label="暂无可切换装备" disabled>—</button>
+        </div>
+        <div class="combat-actions">
+          <button class="fire-button" type="button" aria-label="射击" title="射击" hidden>${COMBAT_ICONS.fire}<span>射击</span></button>
+          <button class="melee-button punch-button" type="button" aria-label="出拳，长按蓄力勾拳" title="出拳 · 长按蓄力">${COMBAT_ICONS.punch}<span>出拳</span></button>
+          <button class="melee-button kick-button" type="button" aria-label="踢腿，长按蓄力旋风踢" title="踢腿 · 长按蓄力">${COMBAT_ICONS.kick}<span>踢腿</span></button>
+        </div>
+      </div>
+      <div class="controls">WASD / 方向键移动 · J 出拳 · K 踢腿 · Q / E 切换方式</div>
       <div class="upgrade-panel" role="region" aria-label="选择强化">
         <div class="upgrade-box">
           <div class="upgrade-heading">
@@ -2920,7 +2978,11 @@ class OfficeEscapeGame {
       magazineFill: root.querySelector<SVGPathElement>(".magazine-fill")!,
       reloadBar: root.querySelector<HTMLDivElement>(".reload-fill")!,
       fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
-      reloadButton: root.querySelector<HTMLButtonElement>(".reload-button")!,
+      punchButton: root.querySelector<HTMLButtonElement>(".punch-button")!,
+      kickButton: root.querySelector<HTMLButtonElement>(".kick-button")!,
+      previousMode: root.querySelector<HTMLButtonElement>(".mode-previous")!,
+      nextMode: root.querySelector<HTMLButtonElement>(".mode-next")!,
+      currentMode: root.querySelector<HTMLDivElement>(".mode-current")!,
       controls: root.querySelector<HTMLDivElement>(".controls")!,
       upgradePanel: root.querySelector<HTMLDivElement>(".upgrade-panel")!,
       upgradeTimer: root.querySelector<HTMLOutputElement>(".upgrade-timer")!,

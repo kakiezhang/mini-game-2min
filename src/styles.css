@@ -700,8 +700,7 @@ canvas {
 
 .ui-root.is-unarmed .weapon-icon,
 .ui-root.is-unarmed .ammo-group,
-.ui-root.is-unarmed .reload-track,
-.ui-root.is-unarmed .reload-button {
+.ui-root.is-unarmed .reload-track {
   display: none;
 }
 
@@ -770,11 +769,68 @@ canvas {
   color: #ffd1c8;
 }
 
-.fire-button {
+.combat-controls {
   position: absolute;
-  right: max(22px, env(safe-area-inset-right));
+  right: max(16px, env(safe-area-inset-right));
   bottom: max(28px, env(safe-area-inset-bottom));
-  display: none;
+  width: 148px;
+  pointer-events: none;
+}
+
+.attack-mode-selector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.mode-current,
+.mode-side {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(13, 23, 20, 0.86);
+  color: #e8f4e9;
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.24);
+}
+
+.mode-current {
+  flex-direction: column;
+  width: 60px;
+  height: 60px;
+  border: 2px solid #8bdfaa;
+  gap: 1px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.mode-current svg { width: 28px; height: 28px; }
+.mode-side svg { width: 29px; height: 29px; }
+
+.mode-side {
+  width: 44px;
+  height: 44px;
+  padding: 6px;
+  border: 1px solid rgba(207, 226, 213, 0.7);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mode-side:disabled { opacity: 0.35; }
+.mode-side:active:not(:disabled) { background: #375a47; transform: scale(0.94); }
+.combat-actions { display: flex; align-items: center; justify-content: center; gap: 8px; height: var(--mobile-control-size); }
+.combat-actions [hidden] { display: none !important; }
+
+.fire-button,
+.melee-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   width: var(--mobile-control-size);
   height: var(--mobile-control-size);
   padding: 0;
@@ -784,48 +840,35 @@ canvas {
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
   pointer-events: auto;
   touch-action: none;
+  color: #ffe3a0;
+  font-size: 12px;
+  font-weight: 800;
 }
 
-.fire-button.is-active {
+.fire-button.is-active,
+.melee-button.is-active {
   background: rgba(112, 76, 28, 0.82);
   transform: scale(0.96);
 }
 
-.fire-icon {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  display: block;
-  transform: translate(-50%, -50%);
-  width: var(--mobile-control-inner-size);
-  height: var(--mobile-control-inner-size);
-  border: 3px solid #ffd166;
-  border-radius: 50%;
-  background: rgba(244, 240, 218, 0.86);
+.fire-button svg { width: 64px; height: 64px; }
+.melee-button svg { width: 34px; height: 34px; }
+
+.melee-button {
+  --charge: 0deg;
+  width: 70px;
+  height: 70px;
+  border-color: #adcdb8;
+  color: #e2f5e5;
+  background: linear-gradient(#20332e, #20332e) padding-box,
+    conic-gradient(#ffd166 var(--charge), #adcdb8 var(--charge)) border-box;
+  border: 3px solid transparent;
 }
 
-.reload-button {
-  position: absolute;
-  right: calc(max(22px, env(safe-area-inset-right)) + clamp(35px, calc(18vw - 29px), 43px));
-  bottom: calc(max(28px, env(safe-area-inset-bottom)) + var(--mobile-control-size) + 18px);
-  display: none;
-  width: 58px;
-  height: 58px;
-  padding: 0;
-  border: 2px solid rgba(125, 211, 252, 0.8);
-  border-radius: 50%;
-  background: rgba(13, 19, 17, 0.72);
-  color: #d9f4ff;
-  font-size: 24px;
-  font-weight: 900;
-  pointer-events: auto;
-  touch-action: none;
-}
-
-.reload-button.is-active {
-  background: rgba(24, 83, 110, 0.86);
-  transform: scale(0.95);
-}
+.melee-button.is-charged { color: #ffe09a; box-shadow: 0 0 18px #e9bd5470; }
+.melee-button.is-active { background: linear-gradient(#365246, #365246) padding-box,
+  conic-gradient(#ffd166 var(--charge), #adcdb8 var(--charge)) border-box; }
+.combat-controls button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
 
 .float-text {
   position: absolute;
@@ -1105,10 +1148,6 @@ canvas {
     display: none;
   }
 
-  .fire-button,
-  .reload-button {
-    display: block;
-  }
 
   .upgrade-box {
     top: calc(max(16px, env(safe-area-inset-top)) + 126px);
@@ -1143,14 +1182,6 @@ canvas {
     margin-top: 4px;
     font-size: 12px;
   }
-}
-
-@media (hover: none) and (pointer: coarse) {
-  .fire-button,
-  .reload-button {
-    display: block;
-  }
-
 }
 
 @media (max-height: 600px) and (orientation: portrait) {

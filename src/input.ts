@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { PLAYER_CONFIG } from "./config.js";
+import type { AttackMode } from "./attack-modes.js";
+import { CombatInputBuffer, type MeleeKind, type MeleeRequest } from "./combat-input.js";
 
 const JOYSTICK_EDGE_OVERFLOW = 10;
 const JOYSTICK_DEADZONE = 0.12;
@@ -27,7 +29,10 @@ export type InputState = {
   aimPointX: number;
   aimPointZ: number;
   fireHeld: boolean;
-  reloadPressed: boolean;
+  meleeRequests: MeleeRequest[];
+  punchCharge: number;
+  kickCharge: number;
+  modeStep: -1 | 0 | 1;
 };
 
 type JoystickElements = {
@@ -42,9 +47,8 @@ export class InputController {
   private readonly mouseNdc = new THREE.Vector2();
   private readonly aimPoint = new THREE.Vector3();
   private pointerAimQueued = false;
-  private fireHeld = false;
-  private fireQueued = false;
-  private reloadQueued = false;
+  private readonly combat = new CombatInputBuffer();
+  private modeStep: -1 | 0 | 1 = 0;
   private lastAimX = 0;
   private lastAimZ = -1;
   private joystickActive = false;
@@ -60,13 +64,16 @@ export class InputController {
     private readonly canvas: HTMLCanvasElement,
     private readonly camera: THREE.Camera,
     private readonly joystick: JoystickElements,
-    private readonly fireButton: HTMLElement,
-    private readonly reloadButton: HTMLElement,
+    private readonly buttons: {
+      fire: HTMLButtonElement; punch: HTMLButtonElement; kick: HTMLButtonElement;
+      previous: HTMLButtonElement; next: HTMLButtonElement;
+    },
   ) {
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onBlur);
     window.addEventListener("pointerup", this.onWindowPointerUp);
+    window.addEventListener("pointercancel", this.onWindowPointerCancel);
     canvas.addEventListener("pointermove", this.onCanvasPointerMove);
     canvas.addEventListener("pointerdown", this.onCanvasPointerDown);
     canvas.addEventListener("contextmenu", (event) => event.preventDefault());
@@ -75,12 +82,11 @@ export class InputController {
     joystick.base.addEventListener("pointermove", this.onJoystickMove);
     joystick.base.addEventListener("pointerup", this.releaseJoystick);
     joystick.base.addEventListener("pointercancel", this.releaseJoystick);
-    fireButton.addEventListener("pointerdown", this.onFireButtonDown);
-    fireButton.addEventListener("pointerup", this.onFireButtonUp);
-    fireButton.addEventListener("pointercancel", this.onFireButtonUp);
-    reloadButton.addEventListener("pointerdown", this.onReloadButtonDown);
-    reloadButton.addEventListener("pointerup", this.onReloadButtonUp);
-    reloadButton.addEventListener("pointercancel", this.onReloadButtonUp);
+    this.bindAttackButton(buttons.fire, "punch");
+    this.bindAttackButton(buttons.punch, "punch");
+    this.bindAttackButton(buttons.kick, "kick");
+    this.bindModeButton(buttons.previous, -1);
+    this.bindModeButton(buttons.next, 1);
   }
 
   getState(playerX: number, playerZ: number): InputState {
@@ -123,10 +129,8 @@ export class InputController {
     }
     this.pointerAimQueued = false;
 
-    const reloadPressed = this.reloadQueued;
-    const fireRequested = this.fireHeld || this.fireQueued || this.keys.has("KeyJ");
-    this.reloadQueued = false;
-    this.fireQueued = false;
+    const modeStep = this.modeStep;
+    this.modeStep = 0;
     return {
       moveX,
       moveZ,
@@ -135,29 +139,44 @@ export class InputController {
       aimZ: this.lastAimZ,
       aimPointX,
       aimPointZ,
-      fireHeld: fireRequested,
-      reloadPressed,
+      ...this.combat.consume(performance.now() / 1000),
+      modeStep,
     };
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
+    if (event.target instanceof HTMLElement && event.target.matches("input, select, textarea, [contenteditable=true]")) return;
     this.keys.add(event.code);
-    // Preserve a very short J tap even if keyup arrives before the next frame.
-    if (event.code === "KeyJ" && !event.repeat) this.fireQueued = true;
-    if (event.code === "KeyR" && !event.repeat) this.reloadQueued = true;
+    if (["KeyJ", "KeyK", "KeyQ", "KeyE"].includes(event.code)) event.preventDefault();
+    if (event.repeat) return;
+    if (event.code === "KeyJ" || event.code === "KeyK") {
+      this.combat.press(event.code, event.code === "KeyJ" ? "punch" : "kick", performance.now() / 1000);
+    }
+    if (event.code === "KeyQ") this.modeStep = -1;
+    if (event.code === "KeyE") this.modeStep = 1;
   };
 
   private onKeyUp = (event: KeyboardEvent) => {
     this.keys.delete(event.code);
+    this.combat.release(event.code, performance.now() / 1000);
   };
 
   private onBlur = () => {
     this.keys.clear();
-    this.fireHeld = false;
-    this.fireButton.classList.remove("is-active");
-    this.reloadButton.classList.remove("is-active");
+    this.resetCombat();
     this.releaseJoystick();
   };
+
+  resetCombat() {
+    this.combat.reset();
+    this.modeStep = 0;
+    for (const button of [this.buttons.fire, this.buttons.punch, this.buttons.kick]) button.classList.remove("is-active");
+  }
+
+  setAttackMode(mode: AttackMode) {
+    this.resetCombat();
+    this.combat.setMode(mode);
+  }
 
   private onCanvasPointerMove = (event: PointerEvent) => {
     if (event.pointerType === "touch") return;
@@ -170,37 +189,67 @@ export class InputController {
   private onCanvasPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || event.pointerType === "touch") return;
     this.onCanvasPointerMove(event);
-    this.fireHeld = true;
-    this.fireQueued = true;
+    this.combat.press(`pointer-${event.pointerId}`, "punch", performance.now() / 1000);
   };
 
   private onWindowPointerUp = (event: PointerEvent) => {
-    if (event.pointerType !== "touch" && event.button === 0) this.fireHeld = false;
+    this.combat.release(`pointer-${event.pointerId}`, performance.now() / 1000);
+  };
+  private onWindowPointerCancel = (event: PointerEvent) => {
+    this.combat.release(`pointer-${event.pointerId}`, performance.now() / 1000, true);
   };
 
-  private onFireButtonDown = (event: PointerEvent) => {
-    event.preventDefault();
-    this.fireButton.setPointerCapture(event.pointerId);
-    this.fireHeld = true;
-    this.fireQueued = true;
-    this.fireButton.classList.add("is-active");
-  };
+  private bindAttackButton(button: HTMLButtonElement, kind: MeleeKind) {
+    button.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || button.disabled) return;
+      event.preventDefault();
+      button.setPointerCapture(event.pointerId);
+      this.combat.press(`pointer-${event.pointerId}`, kind, performance.now() / 1000);
+      button.classList.add("is-active");
+    });
+    const release = (event: PointerEvent) => {
+      this.combat.release(`pointer-${event.pointerId}`, performance.now() / 1000, event.type !== "pointerup");
+      button.classList.remove("is-active");
+    };
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("lostpointercapture", release);
+    // Keyboard and assistive activation have no pointer sequence.
+    button.addEventListener("click", event => {
+      if (event.detail !== 0) return;
+      const now = performance.now() / 1000;
+      this.combat.press("accessible-click", kind, now);
+      this.combat.release("accessible-click", now);
+    });
+  }
 
-  private onFireButtonUp = () => {
-    this.fireHeld = false;
-    this.fireButton.classList.remove("is-active");
-  };
-
-  private onReloadButtonDown = (event: PointerEvent) => {
-    event.preventDefault();
-    this.reloadButton.setPointerCapture(event.pointerId);
-    this.reloadQueued = true;
-    this.reloadButton.classList.add("is-active");
-  };
-
-  private onReloadButtonUp = () => {
-    this.reloadButton.classList.remove("is-active");
-  };
+  private bindModeButton(button: HTMLButtonElement, direction: -1 | 1) {
+    let pointerId: number | undefined;
+    button.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || button.disabled || pointerId !== undefined) return;
+      event.preventDefault();
+      pointerId = event.pointerId;
+      button.setPointerCapture(event.pointerId);
+    });
+    const release = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      pointerId = undefined;
+      if (event.type !== "pointerup" || button.disabled) return;
+      const rect = button.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right
+        || event.clientY < rect.top || event.clientY > rect.bottom) return;
+      // The page prevents multi-touch gestures, which also suppresses click
+      // when another finger holds the joystick. Pointer events still arrive.
+      this.modeStep = direction;
+    };
+    button.addEventListener("pointerup", release);
+    button.addEventListener("pointercancel", release);
+    button.addEventListener("lostpointercapture", release);
+    button.addEventListener("click", event => {
+      // Preserve keyboard/assistive activation without applying a pointer tap twice.
+      if (event.detail === 0 && !button.disabled) this.modeStep = direction;
+    });
+  }
 
   private onJoystickDown = (event: PointerEvent) => {
     event.preventDefault();

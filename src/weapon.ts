@@ -55,7 +55,7 @@ export class WeaponSystem {
       result.reloadCompleted = true;
     }
 
-    if (reloadPressed && this.startReload(elapsed)) {
+    if ((reloadPressed || this.magazineAmmo === 0) && this.startReload(elapsed)) {
       this.pendingShotAt = undefined;
       result.reloadStarted = true;
       result.reloadDurationSeconds = this.reloadEndsAt - this.reloadStartedAt;
@@ -113,6 +113,14 @@ export class WeaponSystem {
     const previousAmmo = this.reserveAmmo;
     this.reserveAmmo = Math.min(this.config.maxReserveAmmo, this.reserveAmmo + Math.max(0, amount));
     return this.reserveAmmo - previousAmmo;
+  }
+
+  holster() {
+    this.pendingShotAt = undefined;
+    this.isReloading = false;
+    this.reloadStartedAt = 0;
+    this.reloadEndsAt = 0;
+    this.postReloadBoostUntil = 0;
   }
 
   applyStats(stats: WeaponRuntimeStats) {

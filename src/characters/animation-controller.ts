@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { createRifleJogClip } from "./jog-animation.js";
 import { RunShootClipFactory } from "./run-shoot-animation.js";
+import type { MeleeAction } from "../melee.js";
 
 export type CharacterLocomotionState = "idle" | "walk" | "jog" | "run";
-export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death";
+export type CharacterOneShotState = "shoot" | "attack" | "reload" | "melee" | "search" | "hit" | "death" | MeleeAction;
 export type CharacterAnimationState = CharacterLocomotionState | CharacterOneShotState;
 export type CharacterAnimationConfig = {
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
@@ -14,6 +15,7 @@ export type CharacterAnimationConfig = {
   walkCycleCount?: number;
   jogFromWalkRun?: boolean;
   runShootFromRun?: boolean;
+  runSpeedThreshold?: number;
 };
 export type CharacterActionPlaybackOptions = {
   restartIfActive?: boolean;
@@ -77,9 +79,11 @@ export class CharacterAnimationController {
   private readonly idlePose: number;
   private readonly animationSpeed: number;
   private readonly walkCycles: number;
+  private readonly runSpeedThreshold: number;
 
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], config: CharacterAnimationConfig) {
     this.walkCycles = config.walkCycleCount ?? (config.jogFromWalkRun ? 3 : 1);
+    this.runSpeedThreshold = config.runSpeedThreshold ?? 1.16;
     if (config.jogFromWalkRun) {
       const walk = findClip(clips, config.clips.walk);
       const run = findClip(clips, config.clips.run);
@@ -184,7 +188,7 @@ export class CharacterAnimationController {
       const jogThreshold = this.locomotionState === "jog" || this.locomotionState === "run" ? 1.04 : 1.08;
       return this.movementSpeedScale >= jogThreshold ? "jog" : "walk";
     }
-    const threshold = this.locomotionState === "run" ? 1.06 : 1.16;
+    const threshold = this.runSpeedThreshold - (this.locomotionState === "run" ? 0.1 : 0);
     return this.actions.has("run") && this.movementSpeedScale >= threshold ? "run" : "walk";
   }
 

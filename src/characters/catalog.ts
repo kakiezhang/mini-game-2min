@@ -3,11 +3,20 @@ import type { EnemyKind } from "../config";
 
 export const CHARACTER_MODELS = {
   playerUnarmed: {
-    url: new URL("../../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href,
+    url: new URL("../../ksman_v3_unarmed_moves_review_1k_meshopt.glb", import.meta.url).href,
     height: 118,
+    runSpeedThreshold: 1.4,
     clips: {
       idle: /^Idle$/i,
       walk: /^Walk$/i,
+      run: /^UnarmedRun$/i,
+      punchJab: /^PunchJab$/i,
+      punchCombo: /^PunchFourCombo$/i,
+      punchHook: /^PunchHook$/i,
+      kickSide: /^KickSide$/i,
+      kickLow: /^KickLow$/i,
+      kickRoundhouse: /^KickRoundhouse$/i,
+      kickHurricane: /^KickHurricane$/i,
     },
   },
   player: {
