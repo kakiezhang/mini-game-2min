@@ -405,7 +405,7 @@ const installModel = (gltf: GLTF, name: string) => {
   });
   modelStage.add(gltf.scene);
   updateStats(gltf.scene);
-  if (name !== REVIEW_MODEL_NAME && name.startsWith("ksman_v3_")
+  if (name.startsWith("ksman_v3_")
     && gltf.scene.getObjectByName("mixamorigRightHand") instanceof THREE.Bone) {
     heldWeapon = attachPlayerSmg(gltf.scene);
     heldWeapon.weapon.visible = false;

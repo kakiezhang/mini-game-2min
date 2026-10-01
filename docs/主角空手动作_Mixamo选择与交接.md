@@ -21,7 +21,7 @@
 
 - 原始合并模型：`ksman_v3_unarmed_moves_review.glb`。
 - 1K WebP／Meshopt 预览模型：`ksman_v3_unarmed_moves_review_1k_meshopt.glb`，约 1.73 MB，共 15 段动作（原有七段和新增八段）。
-- 打开 `http://localhost:6173/character-preview.html`，页面会优先加载这份压缩预览 GLB 并播放 `PunchJab`；这份空手动作预览不会给角色挂枪。在动作下拉框依次选 `UnarmedRun`、`PunchJab`、`PunchFourCombo`、`PunchHook`、`KickSide`、`KickLow`、`KickRoundhouse`、`KickHurricane`。可调慢播放、逐帧拖动、旋转镜头检查脚底、手腕和动作收势。
+- 打开 `http://localhost:6173/character-preview.html`，页面会优先加载这份压缩预览 GLB 并播放 `PunchJab`。在动作下拉框依次选 `UnarmedRun`、`PunchJab`、`PunchFourCombo`、`PunchHook`、`KickSide`、`KickLow`、`KickRoundhouse`、`KickHurricane`；这八段动作不显示枪。预览原有 `RifleIdle`、`RifleWalk`、`RifleRun`、`Shoot`、`Reload` 时仍显示枪。可调慢播放、逐帧拖动、旋转镜头检查脚底、手腕和动作收势。
 
 合并脚本报告新增动作的最大关节位置误差低于 0.0001 米。`UnarmedRun` 源文件首尾骨骼位置最大差约 0.0000015 米，首尾骨骼角度差为 0°。压缩模型使用 1024×1024 WebP 和 Meshopt；现有 `Idle` 循环及原始 `Walk` 对照检查通过。以上是结构和数值检查，**视觉效果仍以动作验收台查看为准**。
 
