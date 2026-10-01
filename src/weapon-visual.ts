@@ -7,7 +7,8 @@ export type HeldWeaponVisual = {
 };
 
 export function shouldShowPlayerSmg(actions: readonly { name: string; weight: number }[]) {
-  return actions.some(action => action.weight > 1e-3 && !/^(Idle|Walk)$/i.test(action.name));
+  return actions.some(action => action.weight > 1e-3
+    && /^(RifleIdle|RifleWalk|RifleJog|RifleRun|RifleRunShoot|Shoot|Reload)$/i.test(action.name));
 }
 
 const LOWERED_GUN_ROTATION = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.42, 0, 0));

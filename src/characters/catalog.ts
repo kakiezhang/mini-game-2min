@@ -2,6 +2,14 @@ import type { CharacterModelConfig } from "./animated-character";
 import type { EnemyKind } from "../config";
 
 export const CHARACTER_MODELS = {
+  playerUnarmed: {
+    url: new URL("../../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href,
+    height: 118,
+    clips: {
+      idle: /^Idle$/i,
+      walk: /^Walk$/i,
+    },
+  },
   player: {
     url: new URL("../../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href,
     height: 118,

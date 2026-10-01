@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".supply-test-dist",
+    "rootDir": "."
+  },
+  "include": ["src/supplies.ts", "tests/supplies.test.ts"]
+}

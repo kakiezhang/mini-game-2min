@@ -232,9 +232,8 @@ export const BULLET_VISUAL = {
 };
 
 export const AMMO_CONFIG = {
-  fixedAmount: 40,
+  supplyAmount: 40,
   droppedAmount: 12,
-  fixedRespawnTime: 20,
   droppedLifetime: 24,
   maxDroppedPacks: 20,
   dropChance: {
@@ -243,12 +242,15 @@ export const AMMO_CONFIG = {
     meeting: 0.25,
     boss: 0,
   } satisfies Record<EnemyKind, number>,
-  fixedSpawns: [
-    { id: "workstation", x: 450, z: 1000 },
-    { id: "bossOffice", x: 950, z: 450 },
-    { id: "eastWorkstation", x: 1390, z: 1010 },
-  ],
 };
+
+export const SUPPLY_CONFIG = {
+  respawnInterval: 15,
+  lifetime: 35,
+  maxActive: 4,
+  medkitHeal: 30,
+  pickupRadius: 27,
+} as const;
 
 export const getSpawnStage = (elapsed: number) => {
   if (elapsed < 15) return { interval: 1.8, count: 1, weights: { bug: 100, changeRequest: 0, meeting: 0 } };

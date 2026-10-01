@@ -9,6 +9,8 @@ import "./character-preview.css";
 
 const DEFAULT_MODEL_URL = `${new URL("../ksman_v3_walk_1k_meshopt.glb", import.meta.url).href}?preview=${Date.now()}`;
 const DEFAULT_MODEL_NAME = "ksman_v3_walk_1k_meshopt.glb";
+const REVIEW_MODEL_NAME = "ksman_v3_unarmed_moves_review_1k_meshopt.glb";
+const REVIEW_MODEL_URL = `${new URL("../ksman_v3_unarmed_moves_review_1k_meshopt.glb", import.meta.url).href}?preview=${Date.now()}`;
 
 const canvas = document.querySelector<HTMLCanvasElement>("#character-preview-canvas")!;
 const status = document.querySelector<HTMLElement>("#load-status")!;
@@ -403,8 +405,10 @@ const installModel = (gltf: GLTF, name: string) => {
   });
   modelStage.add(gltf.scene);
   updateStats(gltf.scene);
-  if (name.startsWith("ksman_v3_") && gltf.scene.getObjectByName("mixamorigRightHand") instanceof THREE.Bone) {
+  if (name !== REVIEW_MODEL_NAME && name.startsWith("ksman_v3_")
+    && gltf.scene.getObjectByName("mixamorigRightHand") instanceof THREE.Bone) {
     heldWeapon = attachPlayerSmg(gltf.scene);
+    heldWeapon.weapon.visible = false;
   }
 
   skeletonHelper = new THREE.SkeletonHelper(gltf.scene);
@@ -427,10 +431,11 @@ const installModel = (gltf: GLTF, name: string) => {
   playToggle.disabled = !hasAnimation;
   timeline.disabled = !hasAnimation;
   if (hasAnimation) {
-    const defaultClipIndex = gltf.animations.findIndex(clip => clip.name.toLowerCase() === "rifleidle");
+    const preferredClip = name === REVIEW_MODEL_NAME ? "PunchJab" : "RifleIdle";
+    const defaultClipIndex = gltf.animations.findIndex(clip => clip.name.toLowerCase() === preferredClip.toLowerCase());
     animationSelect.value = String(Math.max(defaultClipIndex, 0));
     chooseAnimation(Math.max(defaultClipIndex, 0));
-    setStatus("模型与动作已就绪", "ready");
+    setStatus(name === REVIEW_MODEL_NAME ? "空手动作预览已就绪" : "模型与动作已就绪", "ready");
   } else {
     statAnimation.textContent = "无动画";
     statDuration.textContent = "—";
@@ -734,4 +739,17 @@ renderer.setAnimationLoop(() => {
   renderer.render(scene, camera);
 });
 
-void loadModel(DEFAULT_MODEL_URL, DEFAULT_MODEL_NAME);
+const loadInitialModel = async () => {
+  try {
+    const response = await fetch(REVIEW_MODEL_URL, { method: "HEAD" });
+    if (response.ok && response.headers.get("content-type")?.includes("model/gltf-binary")) {
+      await loadModel(REVIEW_MODEL_URL, REVIEW_MODEL_NAME);
+      return;
+    }
+  } catch (error) {
+    console.info("Optional unarmed animation review model is unavailable", error);
+  }
+  await loadModel(DEFAULT_MODEL_URL, DEFAULT_MODEL_NAME);
+};
+
+void loadInitialModel();

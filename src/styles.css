@@ -686,6 +686,25 @@ canvas {
   color: #cbd5c4;
 }
 
+.unarmed-label {
+  display: none;
+  color: #ffe29a;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.ui-root.is-unarmed .unarmed-label {
+  display: inline;
+}
+
+.ui-root.is-unarmed .weapon-icon,
+.ui-root.is-unarmed .ammo-group,
+.ui-root.is-unarmed .reload-track,
+.ui-root.is-unarmed .reload-button {
+  display: none;
+}
+
 .ammo-group {
   display: flex;
   flex: none;

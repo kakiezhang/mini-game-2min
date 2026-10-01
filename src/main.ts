@@ -20,6 +20,7 @@ import {
   GAME,
   MAP,
   PLAYER_CONFIG,
+  SUPPLY_CONFIG,
   WEAPON_UPGRADE_DEFINITIONS,
   getExpToNext,
   getSpawnStage,
@@ -37,6 +38,7 @@ import { GameMinimap } from "./ui/game-minimap";
 import { WeaponSystem, type WeaponSnapshot } from "./weapon";
 import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 import { ELEVATOR_FRAME_LAYOUT, type ElevatorBoxLayout } from "./elevator-layout";
+import { chooseSupplyKind, pickSupplyPosition, type SupplyKind } from "./supplies";
 
 type Enemy = {
   id: number;
@@ -79,13 +81,13 @@ type BulletVisual = {
   impact?: { x: number; z: number; color: number };
 };
 
-type AmmoPickup = {
+type SupplyPickup = {
   group: THREE.Group;
+  item: THREE.Group;
+  kind: SupplyKind;
   amount: number;
   radius: number;
-  fixed: boolean;
-  active: boolean;
-  respawnAt: number;
+  source: "supply" | "drop";
   expiresAt: number;
   phase: number;
 };
@@ -123,7 +125,7 @@ class OfficeEscapeGame {
   private readonly coarsePointer = window.matchMedia("(hover: none) and (pointer: coarse)");
   private readonly clock = new THREE.Clock();
   private readonly navigation = new NavigationWorld(MAP.width, MAP.depth);
-  private readonly weapon = new WeaponSystem(DEFAULT_WEAPON);
+  private readonly weapon = new WeaponSystem({ ...DEFAULT_WEAPON, initialReserveAmmo: 0 });
   private readonly materialCache = new Map<string, THREE.MeshStandardMaterial>();
   private readonly textureCache = new Map<string, THREE.Texture>();
   private readonly textureLoader = new THREE.TextureLoader();
@@ -151,7 +153,10 @@ class OfficeEscapeGame {
   private shotEffects: ShotEffect[] = [];
   private bulletVisuals: BulletVisual[] = [];
   private impactDecals: THREE.Mesh[] = [];
-  private ammoPickups: AmmoPickup[] = [];
+  private supplies: SupplyPickup[] = [];
+  private hasSmg = false;
+  private nextSupplyAt: number = SUPPLY_CONFIG.respawnInterval;
+  private nextUnarmedAttackAt = 0;
   private accessCard?: THREE.Group;
   private accessCardBeacon?: THREE.Group;
   private elevatorZone?: THREE.Mesh;
@@ -224,7 +229,9 @@ class OfficeEscapeGame {
       this.characterAssets.preload(CHARACTER_MODELS.ppt),
       this.characterAssets.preload(CHARACTER_MODELS.changeRequest),
     ]);
-    this.createFixedAmmoSupplies();
+    this.spawnSupply("smg", true);
+    this.spawnSupply("ammo", true);
+    this.spawnSupply("medkit", true);
     this.createCrosshair();
     this.input = new InputController(this.renderer.domElement, this.camera, {
       base: this.hud.joystickBase,
@@ -670,8 +677,6 @@ class OfficeEscapeGame {
   }
 
   private addSupplyRoomDetails() {
-    this.addSupplyPad(450, 1000, 0x32d583);
-    this.addSupplyPad(950, 450, 0x32d583);
     this.addVendingMachine(990, 820);
     this.addFloorDecal(810, 840, 70, 0xa9cdae, 0.1);
     this.addWallMarker(1030, 850, -Math.PI / 2, 0xa7f3c0);
@@ -691,7 +696,6 @@ class OfficeEscapeGame {
     this.addComputerSet(1450, 280, Math.PI, 0xd9b6ff);
     this.addComputerSet(1270, 750, 0, 0x7dd3fc);
     this.addComputerSet(1510, 900, Math.PI, 0x38bdf8);
-    this.addSupplyPad(1390, 1010, 0x32d583);
     this.addFilingCabinet(1640, 270, 0x566251);
     this.addFilingCabinet(1630, 1010, 0x4e6571);
     this.addCrateStack(1250, 1450, 0.3);
@@ -776,18 +780,6 @@ class OfficeEscapeGame {
     group.position.set(x, 0, z);
     group.rotation.y = rotationY;
     this.scene.add(group);
-  }
-
-  private addSupplyPad(x: number, z: number, color: number) {
-    this.addFloorDecal(x, z, 48, color, 0.18);
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(36, 42, 28),
-      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.52, depthWrite: false }),
-    );
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(x, 9.4, z);
-    ring.renderOrder = 5;
-    this.scene.add(ring);
   }
 
   private addVendingMachine(x: number, z: number) {
@@ -932,7 +924,6 @@ class OfficeEscapeGame {
   private async createPlayer() {
     this.player = new THREE.Group();
 
-    const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
     const selectionRing = new THREE.Mesh(
       new THREE.RingGeometry(25, 32, 32),
       new THREE.MeshBasicMaterial({ color: COLORS.playerAccent, transparent: true, opacity: 0.38, depthWrite: false }),
@@ -948,16 +939,10 @@ class OfficeEscapeGame {
     this.playerLight.position.set(this.playerState.x, 72, this.playerState.z);
     this.scene.add(this.playerLight);
 
-    this.playerVisual = await this.characterAssets.createAsync(CHARACTER_MODELS.player, {
+    this.playerVisual = await this.characterAssets.createAsync(CHARACTER_MODELS.playerUnarmed, {
       maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
     });
     this.player.add(this.playerVisual.root);
-    if (this.playerVisual.muzzleSocket) {
-      this.playerVisual.muzzleSocket.add(muzzleAccent);
-    } else {
-      muzzleAccent.position.set(16, 44, 83);
-      this.player.add(muzzleAccent);
-    }
   }
 
   private createCrosshair() {
@@ -975,43 +960,74 @@ class OfficeEscapeGame {
     this.scene.add(this.crosshair);
   }
 
-  private createFixedAmmoSupplies() {
-    for (const spawn of AMMO_CONFIG.fixedSpawns) {
-      this.createAmmoPickup(spawn.x, spawn.z, AMMO_CONFIG.fixedAmount, true);
-    }
+  private spawnSupply(kind: SupplyKind, nearPlayer = false) {
+    const origin = { x: this.playerState.x, z: this.playerState.z };
+    const isValid = (position: { x: number; z: number }) => (
+      this.navigation.canOccupy(position.x, position.z, 38)
+      && this.navigation.canMoveDirectly(origin.x, origin.z, position.x, position.z, PLAYER_CONFIG.radius)
+      && this.supplies.every(pickup => Math.hypot(
+        pickup.group.position.x - position.x, pickup.group.position.z - position.z,
+      ) > 110)
+    );
+    const position = pickSupplyPosition(origin, nearPlayer ? 100 : 170, nearPlayer ? 270 : 510, isValid)
+      ?? pickSupplyPosition(origin, 80, 650, isValid)
+      ?? (nearPlayer ? pickSupplyPosition(origin, 65, 100, isValid) : undefined);
+    if (!position) return false;
+    this.createSupplyPickup(position.x, position.z, kind, "supply");
+    return true;
   }
 
-  private createAmmoPickup(x: number, z: number, amount: number, fixed: boolean) {
+  private createSupplyPickup(x: number, z: number, kind: SupplyKind, source: "supply" | "drop") {
     const group = new THREE.Group();
-    const color = fixed ? COLORS.ammoBox : COLORS.ammoPack;
-    const base = this.mesh(new THREE.BoxGeometry(fixed ? 46 : 30, fixed ? 24 : 12, fixed ? 34 : 22), color);
-    base.position.y = fixed ? 14 : 8;
-    const lid = this.mesh(new THREE.BoxGeometry(fixed ? 50 : 32, 5, fixed ? 38 : 24), 0xdfffea);
-    lid.position.y = fixed ? 28 : 15;
-    group.add(base, lid);
-
-    for (let index = -1; index <= 1; index += 1) {
-      const round = this.mesh(new THREE.CylinderGeometry(2.5, 2.5, 14, 6), COLORS.muzzle);
-      round.position.set(index * 9, fixed ? 38 : 24, 0);
-      group.add(round);
+    const item = new THREE.Group();
+    const color = kind === "smg" ? 0xffd166 : kind === "medkit" ? 0xff7979 : COLORS.ammoBox;
+    if (source === "supply") {
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(35, 41, 28),
+        new THREE.MeshBasicMaterial({ color: COLORS.ammoBox, transparent: true, opacity: 0.6, depthWrite: false }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 9.4;
+      ring.renderOrder = 5;
+      group.add(ring);
     }
-
-    if (fixed) {
-      const glow = createDynamicPointLight("ammo", COLORS.ammoBox, 0.65, 180, 1.7);
-      glow.position.y = 42;
-      group.add(glow);
+    if (kind === "smg") {
+      const body = this.mesh(new THREE.BoxGeometry(48, 9, 12), 0x3a4247);
+      body.position.y = 32;
+      const barrel = this.mesh(new THREE.BoxGeometry(28, 5, 6), color);
+      barrel.position.set(34, 33, 0);
+      const grip = this.mesh(new THREE.BoxGeometry(10, 19, 9), 0x283036);
+      grip.position.set(-5, 20, 0);
+      item.add(body, barrel, grip);
+    } else {
+      const base = this.mesh(new THREE.BoxGeometry(source === "drop" ? 30 : 44, 20, source === "drop" ? 22 : 34), color);
+      base.position.y = 18;
+      const lid = this.mesh(new THREE.BoxGeometry(source === "drop" ? 33 : 48, 5, source === "drop" ? 25 : 38), 0xf3f4ec);
+      lid.position.y = 30;
+      item.add(base, lid);
+      if (kind === "medkit") {
+        const horizontal = this.mesh(new THREE.BoxGeometry(22, 4, 2), 0xe94352);
+        const vertical = this.mesh(new THREE.BoxGeometry(4, 20, 2), 0xe94352);
+        horizontal.position.set(0, 18, 18);
+        vertical.position.set(0, 18, 18);
+        item.add(horizontal, vertical);
+      } else {
+        for (let index = -1; index <= 1; index += 1) {
+          const round = this.mesh(new THREE.CylinderGeometry(2.5, 2.5, 14, 6), COLORS.muzzle);
+          round.position.set(index * 9, 39, 0);
+          item.add(round);
+        }
+      }
     }
-
+    group.add(item);
     group.position.set(x, 0, z);
     this.scene.add(group);
-    this.ammoPickups.push({
-      group,
-      amount,
-      radius: fixed ? 28 : 20,
-      fixed,
-      active: true,
-      respawnAt: 0,
-      expiresAt: fixed ? Number.POSITIVE_INFINITY : this.elapsed + AMMO_CONFIG.droppedLifetime,
+    this.supplies.push({
+      group, item, kind,
+      amount: source === "drop" ? AMMO_CONFIG.droppedAmount : kind === "medkit" ? SUPPLY_CONFIG.medkitHeal : AMMO_CONFIG.supplyAmount,
+      radius: source === "drop" ? 20 : SUPPLY_CONFIG.pickupRadius,
+      source,
+      expiresAt: this.elapsed + (source === "drop" ? AMMO_CONFIG.droppedLifetime : SUPPLY_CONFIG.lifetime),
       phase: Math.random() * Math.PI * 2,
     });
   }
@@ -1102,7 +1118,7 @@ class OfficeEscapeGame {
     const shotAim = this.updateWeapon(input);
     this.updatePlayerAnimation(delta, input);
     if (shotAim) this.fireWeapon(shotAim.x, shotAim.z);
-    this.updateAmmoPickups(delta);
+    this.updateSupplies(delta);
     this.updateAccessCard();
     this.updateEvacuation(delta);
     this.updateObjectiveBeacons(delta);
@@ -1492,6 +1508,10 @@ class OfficeEscapeGame {
   }
 
   private updateWeapon(input: InputState) {
+    if (!this.hasSmg) {
+      this.updateUnarmedAttack(input);
+      return undefined;
+    }
     const update = this.weapon.update(this.elapsed, input.fireHeld, input.reloadPressed);
     let shotAim: { x: number; z: number } | undefined;
     if (update.reloadStarted) {
@@ -1520,58 +1540,120 @@ class OfficeEscapeGame {
     return shotAim;
   }
 
-  private updateAmmoPickups(delta: number) {
-    for (const pickup of this.ammoPickups) {
-      if (!pickup.active) {
-        if (pickup.fixed && this.elapsed >= pickup.respawnAt) {
-          pickup.active = true;
-          pickup.group.visible = true;
-        }
-        continue;
-      }
+  private updateUnarmedAttack(input: InputState) {
+    if (!input.fireHeld || this.elapsed < this.nextUnarmedAttackAt) return;
+    this.nextUnarmedAttackAt = this.elapsed + 0.52;
+    this.resolveUnarmedAttack(input.aimX, input.aimZ);
+  }
 
-      if (!pickup.fixed && this.elapsed >= pickup.expiresAt) {
-        pickup.active = false;
-        this.removeAmmoPickup(pickup);
-        continue;
-      }
+  private resolveUnarmedAttack(forwardX: number, forwardZ: number) {
+    const range = 74;
+    const target = this.enemies
+      .filter(enemy => enemy.hp > 0 && enemy.ai.state !== "spawning")
+      .map(enemy => ({ enemy, distance: this.distanceToPlayer(enemy.group.position.x, enemy.group.position.z) }))
+      .filter(({ enemy, distance }) => {
+        if (distance > range + enemy.radius || distance < 1) return false;
+        const toEnemyX = (enemy.group.position.x - this.playerState.x) / distance;
+        const toEnemyZ = (enemy.group.position.z - this.playerState.z) / distance;
+        if (toEnemyX * forwardX + toEnemyZ * forwardZ < 0.5) return false;
+        return this.navigation.raycastObstacleDistance(
+          this.playerState.x, this.playerState.z, toEnemyX, toEnemyZ, distance,
+        ) >= distance - enemy.radius;
+      })
+      .sort((first, second) => first.distance - second.distance)[0]?.enemy;
 
-      pickup.group.rotation.y += delta * (pickup.fixed ? 0.7 : 1.4);
-      pickup.group.position.y = Math.sin(this.elapsed * 2.5 + pickup.phase) * 3;
-      if (this.distanceToPlayer(pickup.group.position.x, pickup.group.position.z) > PLAYER_CONFIG.radius + pickup.radius) continue;
+    const swing = new THREE.Group();
+    const arc = new THREE.Mesh(
+      new THREE.RingGeometry(20, 27, 18, 1, -Math.PI * 0.4, Math.PI * 0.8),
+      new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    arc.rotation.x = -Math.PI / 2;
+    swing.add(arc);
+    swing.position.set(this.playerState.x + forwardX * 54, 23, this.playerState.z + forwardZ * 54);
+    swing.rotation.y = Math.atan2(forwardX, forwardZ);
+    this.scene.add(swing);
+    this.shotEffects.push({ object: swing, life: 0.13, maxLife: 0.13 });
+    if (!target) return;
+    target.hp -= 12;
+    target.hitFlashUntil = this.elapsed + 0.14;
+    this.enemyAi.notifyHit(target.ai, this.playerState.x, this.playerState.z, this.elapsed);
+    this.updateEnemyVisualState(target);
+    this.emitParticles(target.group.position.x, 30, target.group.position.z, 0xffd166, 5, 38);
+    this.removeDeadEnemies();
+  }
 
-      const addedAmmo = this.weapon.addReserveAmmo(pickup.amount);
-      if (addedAmmo <= 0) {
-        if (this.elapsed >= this.nextAmmoHintAt) {
-          this.nextAmmoHintAt = this.elapsed + 2;
-          this.showHint("后备弹药已满");
-        }
-        continue;
-      }
+  private equipSmg() {
+    if (this.hasSmg) return;
+    const oldVisual = this.playerVisual;
+    if (oldVisual) {
+      oldVisual.dispose();
+      this.player.remove(oldVisual.root);
+      this.disposeObject(oldVisual.root);
+    }
+    this.playerVisual = this.characterAssets.create(CHARACTER_MODELS.player, {
+      maxAnisotropy: this.renderer.capabilities.getMaxAnisotropy(),
+    });
+    this.player.add(this.playerVisual.root);
+    const muzzleAccent = new THREE.PointLight(COLORS.muzzle, 0.18, 90, 1.9);
+    this.playerVisual.muzzleSocket?.add(muzzleAccent);
+    this.hasSmg = true;
+  }
 
-      this.emitParticles(pickup.group.position.x, 24, pickup.group.position.z, COLORS.ammoPack, 8, 52);
-      this.showFloating(`弹药 +${addedAmmo}`, "#b9f9d4");
-      if (pickup.fixed) {
-        pickup.active = false;
-        pickup.group.visible = false;
-        pickup.respawnAt = this.elapsed + AMMO_CONFIG.fixedRespawnTime;
-      } else {
-        pickup.active = false;
-        this.removeAmmoPickup(pickup);
+  private updateSupplies(delta: number) {
+    if (this.elapsed >= this.nextSupplyAt) {
+      this.nextSupplyAt = this.elapsed + SUPPLY_CONFIG.respawnInterval;
+      const activeSupplies = this.supplies.filter(pickup => pickup.source === "supply");
+      if (activeSupplies.length < SUPPLY_CONFIG.maxActive) {
+        const kind = !this.hasSmg && activeSupplies.some(pickup => pickup.kind === "smg")
+          ? Math.random() < 0.5 ? "ammo" : "medkit"
+          : chooseSupplyKind(this.hasSmg, this.playerState.hp < this.playerState.maxHp);
+        this.spawnSupply(kind);
       }
     }
+    for (const pickup of [...this.supplies]) {
+      if (this.elapsed >= pickup.expiresAt) {
+        this.removeSupply(pickup);
+        continue;
+      }
 
-    this.ammoPickups = this.ammoPickups.filter((pickup) => pickup.fixed || pickup.active);
+      pickup.item.rotation.y += delta * (pickup.source === "supply" ? 0.7 : 1.4);
+      pickup.item.position.y = Math.sin(this.elapsed * 2.5 + pickup.phase) * 3;
+      if (this.distanceToPlayer(pickup.group.position.x, pickup.group.position.z) > PLAYER_CONFIG.radius + pickup.radius) continue;
+      if (pickup.kind === "smg") {
+        if (this.hasSmg) continue;
+        this.equipSmg();
+        this.showFloating("冲锋枪已装备", "#ffe39a");
+      } else if (pickup.kind === "medkit") {
+        const healed = Math.min(pickup.amount, this.playerState.maxHp - this.playerState.hp);
+        if (healed <= 0) continue;
+        this.playerState.hp += healed;
+        this.showFloating(`生命 +${healed}`, "#ffb6b6");
+      } else {
+        const addedAmmo = this.weapon.addReserveAmmo(pickup.amount);
+        if (addedAmmo <= 0) {
+          if (this.elapsed >= this.nextAmmoHintAt) {
+            this.nextAmmoHintAt = this.elapsed + 2;
+            this.showHint("后备弹药已满");
+          }
+          continue;
+        }
+        this.showFloating(`弹药 +${addedAmmo}`, "#b9f9d4");
+      }
+      this.emitParticles(pickup.group.position.x, 24, pickup.group.position.z,
+        pickup.kind === "medkit" ? 0xff7979 : COLORS.ammoBox, 8, 52);
+      this.removeSupply(pickup);
+    }
   }
 
   private maybeDropAmmo(enemy: Enemy) {
     if (Math.random() >= AMMO_CONFIG.dropChance[enemy.kind]) return;
-    const droppedCount = this.ammoPickups.filter((pickup) => !pickup.fixed && pickup.active).length;
+    const droppedCount = this.supplies.filter((pickup) => pickup.source === "drop").length;
     if (droppedCount >= AMMO_CONFIG.maxDroppedPacks) return;
-    this.createAmmoPickup(enemy.group.position.x, enemy.group.position.z, AMMO_CONFIG.droppedAmount, false);
+    this.createSupplyPickup(enemy.group.position.x, enemy.group.position.z, "ammo", "drop");
   }
 
-  private removeAmmoPickup(pickup: AmmoPickup) {
+  private removeSupply(pickup: SupplyPickup) {
+    this.supplies = this.supplies.filter(candidate => candidate !== pickup);
     this.disposeObject(pickup.group);
   }
 
@@ -2224,17 +2306,25 @@ class OfficeEscapeGame {
     this.hud.expText.textContent = `${this.playerState.exp}/${this.playerState.expToNext}`;
     this.hud.expBar.style.width = `${(this.playerState.exp / this.playerState.expToNext) * 100}%`;
     this.hud.expTrack.classList.toggle("is-ready", this.upgradePending && this.currentUpgradeChoices.length > 0);
+    this.hud.root.classList.toggle("is-unarmed", !this.hasSmg);
+    this.hud.fireButton.setAttribute("aria-label", this.hasSmg ? "射击" : "空手攻击");
+    this.hud.fireButton.title = this.hasSmg ? "射击" : "空手攻击";
+    this.hud.controls.textContent = this.hasSmg
+      ? "WASD / 方向键移动并转向 · J / 左键射击 · R 换弹"
+      : "WASD / 方向键移动并转向 · J / 左键空手攻击 · 拾取地上的冲锋枪后可射击";
     const weapon = this.weapon.getSnapshot(this.elapsed);
     const reserveMagazines = Math.ceil(weapon.reserveAmmo / weapon.magazineSize);
     const lastMagazineAmmo = weapon.reserveAmmo === 0 ? 0 : (weapon.reserveAmmo - 1) % weapon.magazineSize + 1;
     this.hud.loadedAmmo.textContent = `×${weapon.magazineAmmo}`;
     this.hud.reserveMagazines.textContent = `×${reserveMagazines}`;
     this.hud.magazineFill.style.transform = `scaleY(${lastMagazineAmmo / weapon.magazineSize})`;
-    this.hud.weaponPanel.setAttribute("aria-label", `冲锋枪，${weapon.isReloading ? "换弹中，" : ""}弹匣内 ${weapon.magazineAmmo}/${weapon.magazineSize} 发，备用 ${weapon.reserveAmmo} 发`);
+    this.hud.weaponPanel.setAttribute("aria-label", this.hasSmg
+      ? `冲锋枪，${weapon.isReloading ? "换弹中，" : ""}弹匣内 ${weapon.magazineAmmo}/${weapon.magazineSize} 发，备用 ${weapon.reserveAmmo} 发`
+      : "空手，靠近冲锋枪补给可拾取");
     this.hud.reloadBar.style.width = `${weapon.reloadProgress * 100}%`;
     this.hud.weaponPanel.classList.toggle("is-reloading", weapon.isReloading);
     this.hud.weaponPanel.classList.toggle("is-empty", weapon.magazineAmmo === 0);
-    this.hud.weaponPanel.classList.toggle("is-low-ammo", weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
+    this.hud.weaponPanel.classList.toggle("is-low-ammo", this.hasSmg && weapon.magazineAmmo <= Math.ceil(weapon.magazineSize * 0.25) && weapon.reserveAmmo > 0 && !weapon.isReloading);
     if (!this.hud.statusDetails.hidden) this.refreshStatusDetails(weapon);
 
     this.hud.root.classList.toggle("is-low-health", this.playerState.hp / this.playerState.maxHp <= 0.28);
@@ -2274,8 +2364,14 @@ class OfficeEscapeGame {
     this.hud.detailMagazineLevel.textContent = `Lv ${this.weaponUpgradeLevels.magazineManagement}/5`;
 
     const stats = getWeaponRuntimeStats(this.weaponUpgradeLevels);
-    this.hud.detailWeaponAmmo.textContent = `弹匣 ${weapon.magazineAmmo}/${weapon.magazineSize} 发 · 备用 ${weapon.reserveAmmo} 发`;
-    this.hud.detailWeaponStats.textContent = `伤害 ${Number(stats.damage.toFixed(1))} · 射速 ${Number(stats.fireRate.toFixed(1))}/秒 · 换弹 ${Number(stats.reloadTime.toFixed(2))} 秒`;
+    this.hud.detailWeaponName.textContent = this.hasSmg ? "冲锋枪" : "空手";
+    this.hud.detailWeaponEquip.textContent = this.hasSmg ? "已装备" : "当前装备";
+    this.hud.detailWeaponAmmo.textContent = this.hasSmg
+      ? `弹匣 ${weapon.magazineAmmo}/${weapon.magazineSize} 发 · 备用 ${weapon.reserveAmmo} 发`
+      : "靠近地上的枪可拾取 · 已拾弹药会保留";
+    this.hud.detailWeaponStats.textContent = this.hasSmg
+      ? `伤害 ${Number(stats.damage.toFixed(1))} · 射速 ${Number(stats.fireRate.toFixed(1))}/秒 · 换弹 ${Number(stats.reloadTime.toFixed(2))} 秒`
+      : "空手攻击伤害 12 · 拳脚动作待接入";
   }
 
   private finishGame(state: "success" | "failed", message: string, color: string) {
@@ -2693,7 +2789,8 @@ class OfficeEscapeGame {
           <div class="hp-track"><div class="hp-fill"></div><div class="hp-value">100/100</div></div>
         </div>
         <div class="exp-track"><div class="exp-fill"></div><div class="exp-value">0/20</div></div>
-        <div class="weapon-panel" role="group" aria-label="冲锋枪，弹匣内 20 发，备用 20 发">
+        <div class="weapon-panel" role="group" aria-label="空手，靠近冲锋枪补给可拾取">
+          <span class="unarmed-label">空手</span>
           <svg class="weapon-icon" viewBox="0 0 64 32" role="img" aria-label="冲锋枪">
             <path fill="currentColor" d="M2 10h9l4 4h5V9h21l5-3h9v3h8v4h-8v3H43l-4 3h-9l-3 11h-9l2-11h-7l-4 5H2v-5h5l3-4H2z"/>
             <path fill="#17221f" d="M25 12h15v3H25z"/>
@@ -2740,7 +2837,7 @@ class OfficeEscapeGame {
           <div class="status-detail-section">
             <div class="status-detail-heading"><span>武器列表</span></div>
             <div class="status-weapon-item">
-              <div class="status-weapon-heading"><strong>冲锋枪</strong><span>已装备</span></div>
+              <div class="status-weapon-heading"><strong class="detail-weapon-name">空手</strong><span class="detail-weapon-equip">当前装备</span></div>
               <div class="detail-weapon-ammo">弹匣 20/20 发 · 备用 20 发</div>
               <div class="detail-weapon-stats">伤害 18 · 射速 5/秒 · 换弹 1.3 秒</div>
             </div>
@@ -2804,6 +2901,8 @@ class OfficeEscapeGame {
       detailSkillPoints: root.querySelector<HTMLElement>(".detail-skill-points")!,
       detailFirepowerLevel: root.querySelector<HTMLElement>(".detail-firepower-level")!,
       detailMagazineLevel: root.querySelector<HTMLElement>(".detail-magazine-level")!,
+      detailWeaponName: root.querySelector<HTMLElement>(".detail-weapon-name")!,
+      detailWeaponEquip: root.querySelector<HTMLElement>(".detail-weapon-equip")!,
       detailWeaponAmmo: root.querySelector<HTMLDivElement>(".detail-weapon-ammo")!,
       detailWeaponStats: root.querySelector<HTMLDivElement>(".detail-weapon-stats")!,
       missionPanel: root.querySelector<HTMLDivElement>(".mission-panel")!,
@@ -2822,6 +2921,7 @@ class OfficeEscapeGame {
       reloadBar: root.querySelector<HTMLDivElement>(".reload-fill")!,
       fireButton: root.querySelector<HTMLButtonElement>(".fire-button")!,
       reloadButton: root.querySelector<HTMLButtonElement>(".reload-button")!,
+      controls: root.querySelector<HTMLDivElement>(".controls")!,
       upgradePanel: root.querySelector<HTMLDivElement>(".upgrade-panel")!,
       upgradeTimer: root.querySelector<HTMLOutputElement>(".upgrade-timer")!,
       upgradeTimerBar: root.querySelector<HTMLDivElement>(".upgrade-timer-bar")!,
