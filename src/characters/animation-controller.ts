@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createRifleJogClip } from "./jog-animation.js";
 import { RunShootClipFactory } from "./run-shoot-animation.js";
+import { MeleeBodyFrame } from "./melee-body-frame.js";
 import type { MeleeAction } from "../melee.js";
 
 export type CharacterLocomotionState = "idle" | "walk" | "jog" | "run";
@@ -16,6 +17,7 @@ export type CharacterAnimationConfig = {
   jogFromWalkRun?: boolean;
   runShootFromRun?: boolean;
   runSpeedThreshold?: number;
+  movingUpperBodyActions?: CharacterOneShotState[];
 };
 export type CharacterActionPlaybackOptions = {
   restartIfActive?: boolean;
@@ -36,14 +38,14 @@ const findClip = (clips: THREE.AnimationClip[], matcher: string | RegExp | undef
   return matcher.test(candidate.name);
 });
 
-const upperBodyClips = (root: THREE.Object3D, clips: THREE.AnimationClip[]) => {
+const bodyClips = (root: THREE.Object3D, clips: THREE.AnimationClip[], upper = true) => {
   let spine: THREE.Bone | undefined;
   root.traverse(object => {
     if (object instanceof THREE.Bone && /Spine$/i.test(object.name) && /Hips$/i.test(object.parent?.name ?? "")) {
       spine = object;
     }
   });
-  if (!spine) throw new Error("Upper-body Shoot requires a Spine bone parented to Hips");
+  if (!spine) throw new Error("Body animation layers require a Spine bone parented to Hips");
 
   const upperBoneNames = new Set<string>();
   spine.traverse(object => { if (object instanceof THREE.Bone) upperBoneNames.add(object.name); });
@@ -52,7 +54,8 @@ const upperBodyClips = (root: THREE.Object3D, clips: THREE.AnimationClip[]) => {
     clip.duration,
     clip.tracks.filter(track => {
       const nodeName = THREE.PropertyBinding.parseTrackName(track.name).nodeName;
-      return nodeName !== undefined && upperBoneNames.has(nodeName);
+      const isUpper = nodeName !== undefined && upperBoneNames.has(nodeName);
+      return upper ? isUpper : !isUpper;
     }),
   ));
 };
@@ -61,6 +64,9 @@ const upperBodyClips = (root: THREE.Object3D, clips: THREE.AnimationClip[]) => {
 export class CharacterAnimationController {
   private readonly mixer: THREE.AnimationMixer;
   private readonly locomotionLayer?: CharacterAnimationController;
+  private readonly lowerBodyLayer?: CharacterAnimationController;
+  private readonly meleeBodyFrame?: MeleeBodyFrame;
+  private readonly movingUpperBodyActions: Set<CharacterOneShotState>;
   private readonly actions = new Map<CharacterAnimationState, THREE.AnimationAction>();
   private readonly allActions: THREE.AnimationAction[] = [];
   private readonly alternateShootAction?: THREE.AnimationAction;
@@ -84,6 +90,10 @@ export class CharacterAnimationController {
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[], config: CharacterAnimationConfig) {
     this.walkCycles = config.walkCycleCount ?? (config.jogFromWalkRun ? 3 : 1);
     this.runSpeedThreshold = config.runSpeedThreshold ?? 1.16;
+    this.movingUpperBodyActions = new Set(config.movingUpperBodyActions);
+    if (config.shootUpperBodyOnly && this.movingUpperBodyActions.size) {
+      throw new Error("Select either rifle layering or moving melee layering");
+    }
     if (config.jogFromWalkRun) {
       const walk = findClip(clips, config.clips.walk);
       const run = findClip(clips, config.clips.run);
@@ -98,7 +108,7 @@ export class CharacterAnimationController {
       if (Object.keys(config.clips).some(state => !["idle", "walk", "jog", "run", "shoot", "reload"].includes(state))) {
         throw new Error("Upper-body actions currently support Idle, Walk, Jog, Run, Shoot, and Reload");
       }
-      const maskedClips = upperBodyClips(root, clips);
+      const maskedClips = bodyClips(root, clips);
       this.locomotionLayer = new CharacterAnimationController(root, clips, {
         ...config,
         clips: { idle: config.clips.idle, walk: config.clips.walk, jog: config.clips.jog, run: config.clips.run },
@@ -108,6 +118,16 @@ export class CharacterAnimationController {
         runShootFromRun: false,
       });
       clips = maskedClips;
+    }
+    if (this.movingUpperBodyActions.size) {
+      // Disjoint tracks let the legs keep their gait while the upper body
+      // punches. Standing attacks and kicks play the source pose on both layers.
+      this.lowerBodyLayer = new CharacterAnimationController(root, bodyClips(root, clips, false), {
+        ...config, movingUpperBodyActions: undefined, jogFromWalkRun: false,
+        walkCycleCount: this.walkCycles,
+      });
+      this.meleeBodyFrame = new MeleeBodyFrame(root, clips);
+      clips = bodyClips(root, clips);
     }
     this.mixer = new THREE.AnimationMixer(root);
     this.idlePose = THREE.MathUtils.clamp(config.idlePose ?? 0.5, 0, 1);
@@ -162,7 +182,7 @@ export class CharacterAnimationController {
       const [state, action] = this.actions.entries().next().value!;
       this.activate(state, action, 0, true);
     }
-    this.mixer.update(0);
+    this.evaluatePose(0);
   }
 
   setMovement(x: number, z: number) {
@@ -174,6 +194,7 @@ export class CharacterAnimationController {
     if (!Number.isFinite(scale) || scale <= 0) return;
     this.movementSpeedScale = THREE.MathUtils.clamp(scale, 0.2, 2);
     this.locomotionLayer?.setMovementSpeedScale(this.movementSpeedScale);
+    this.lowerBodyLayer?.setMovementSpeedScale(this.movementSpeedScale);
     for (const state of ["walk", "jog", "run"] as const) {
       const action = this.actions.get(state);
       if (action) action.timeScale = this.animationSpeed * this.movementSpeedScale;
@@ -199,6 +220,11 @@ export class CharacterAnimationController {
 
   setLocomotion(state: CharacterLocomotionState) {
     this.locomotionLayer?.setLocomotion(state);
+    this.lowerBodyLayer?.setLocomotion(state);
+    if (state !== "idle" && this.oneShotState && this.movingUpperBodyActions.has(this.oneShotState)) {
+      // Starting to move mid-punch releases only the legs; the punch is not restarted.
+      this.lowerBodyLayer?.stopOneShot(this.oneShotState);
+    }
     this.syncLocomotionPhase();
     if (state === this.locomotionState) return;
     this.locomotionState = state;
@@ -219,6 +245,15 @@ export class CharacterAnimationController {
       || (state === "shoot" && (this.alternateShootAction?.getEffectiveWeight() ?? 0) > 1e-6)
       || (state === "shoot" && (this.runShootActions?.some(action => action.getEffectiveWeight() > 1e-6) ?? false))
     )) return false;
+
+    if (this.lowerBodyLayer) {
+      if (this.locomotionState !== "idle" && this.movingUpperBodyActions.has(state)) {
+        const previous = this.lowerBodyLayer.oneShotState;
+        if (previous) this.lowerBodyLayer.stopOneShot(previous);
+      } else {
+        this.lowerBodyLayer.playOneShot(state, options);
+      }
+    }
 
     const runningShoot = state === "shoot" && this.runShootFactory !== undefined && this.runShootActions !== undefined
       && this.locomotionState === "run";
@@ -249,7 +284,7 @@ export class CharacterAnimationController {
       this.fromWeights.clear();
       this.elapsed = this.transitionDuration;
       this.state = state;
-      this.mixer.update(0);
+      this.evaluatePose(0);
       return true;
     }
 
@@ -259,6 +294,7 @@ export class CharacterAnimationController {
 
   stopOneShot(state: CharacterOneShotState) {
     if (this.oneShotState !== state) return false;
+    this.lowerBodyLayer?.stopOneShot(state);
     this.oneShotState = undefined;
     this.activateLocomotion(false);
     return true;
@@ -267,6 +303,7 @@ export class CharacterAnimationController {
   update(delta: number) {
     if (!Number.isFinite(delta) || delta < 0) return;
     this.locomotionLayer?.update(delta);
+    this.lowerBodyLayer?.update(delta);
     if (this.elapsed < this.transitionDuration) {
       this.elapsed = Math.min(this.transitionDuration, this.elapsed + delta);
       const alpha = this.transitionDuration <= 0 ? 1 : this.elapsed / this.transitionDuration;
@@ -279,7 +316,7 @@ export class CharacterAnimationController {
         action.setEffectiveWeight(weight);
       }
     }
-    this.mixer.update(delta);
+    this.evaluatePose(delta);
 
     if (this.oneShotState && this.activeAction) {
       const duration = this.activeAction.getClip().duration;
@@ -296,6 +333,8 @@ export class CharacterAnimationController {
       state: this.state,
       locomotionState: this.locomotionState,
       oneShotState: this.oneShotState,
+      lowerBodyState: this.lowerBodyLayer?.state,
+      lowerBodyOneShotState: this.lowerBodyLayer?.oneShotState,
       transitionDuration: this.transitionDuration,
       transitioning: this.elapsed < this.transitionDuration,
       actions: [...this.actions.entries()].map(([state, primary]) => {
@@ -314,9 +353,11 @@ export class CharacterAnimationController {
   }
 
   dispose() {
+    this.meleeBodyFrame?.restore();
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.mixer.getRoot());
     this.locomotionLayer?.dispose();
+    this.lowerBodyLayer?.dispose();
   }
 
   private activateLocomotion(immediate: boolean) {
@@ -341,21 +382,22 @@ export class CharacterAnimationController {
     // The base layer owns Walk/Idle time. Never restart the masked upper-body
     // action when returning from Shoot: its arms must stay in phase with legs.
     this.activate(this.locomotionState, action, immediate ? 0 : CHARACTER_TRANSITION_SECONDS,
-      !frozenIdle && !this.locomotionLayer && !changingGait);
+      !frozenIdle && !this.locomotionLayer && !this.lowerBodyLayer && !changingGait);
   }
 
   private syncLocomotionPhase() {
-    if (!this.locomotionLayer) return;
+    const baseLayer = this.locomotionLayer ?? this.lowerBodyLayer;
+    if (!baseLayer) return;
     let poseChanged = false;
     for (const state of ["idle", "walk", "jog", "run"] as const) {
-      const source = this.locomotionLayer.actions.get(state);
+      const source = baseLayer.actions.get(state);
       const target = this.actions.get(state);
       if (source && target && Math.abs(target.time - source.time) > 1e-6) {
         target.time = source.time;
         poseChanged = poseChanged || target.getEffectiveWeight() > 1e-6;
       }
     }
-    if (poseChanged) this.mixer.update(0);
+    if (poseChanged) this.evaluatePose(0);
   }
 
   private activate(
@@ -382,6 +424,12 @@ export class CharacterAnimationController {
     this.transitionDuration = duration;
     this.state = state;
     this.activeAction = action;
-    this.mixer.update(0);
+    this.evaluatePose(0);
+  }
+
+  private evaluatePose(delta: number) {
+    this.meleeBodyFrame?.restore();
+    this.mixer.update(delta);
+    this.meleeBodyFrame?.apply(this.allActions);
   }
 }

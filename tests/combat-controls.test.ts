@@ -74,6 +74,40 @@ melee.startQueued(now, 0, -1, () => true);
 melee.cancel();
 assert(!melee.advance(now + 3).length, "Switching equipment cancels remaining melee markers");
 
+// A moving punch releases the legs immediately; kicks release only after contact
+// and retraction. A buffered follow-up must never cut off combo hit markers.
+const flowing = new MeleeSystem();
+flowing.request({ kind: "punch", charged: false }, 0);
+flowing.startQueued(0, 0, -1, () => true);
+assert(!flowing.locksMovement, "Punching must allow movement from the first frame");
+flowing.request({ kind: "punch", charged: false }, 0.1);
+assert(!flowing.releaseRecovery(0.7, true), "Cannot cancel before recovery or skip contact");
+flowing.advance(0.8);
+assert(flowing.releaseRecovery(0.8, true) === "punchJab", "Recent follow-up can use the recovery window");
+flowing.startQueued(0.8, 0, -1, () => true);
+assert(flowing.active?.move.action === "punchCombo", "The queued normal punch continues the cycle");
+flowing.request({ kind: "kick", charged: false }, 0.9);
+let comboHits = 0;
+for (const t of [0.64, 0.87, 1.14, 1.37]) {
+  comboHits += flowing.advance(0.8 + t).length;
+  assert(!flowing.releaseRecovery(0.8 + t, true), "Follow-up cannot interrupt a combo's active strikes");
+}
+assert(comboHits === 4, "Buffered input preserves all four combo contacts");
+assert(flowing.releaseRecovery(0.8 + 50 / 30, true) === "punchCombo", "Combo recovery can chain before full clip ends");
+flowing.startQueued(0.8 + 50 / 30, 0, -1, () => true);
+assert(flowing.locksMovement, "Kick keeps its support foot planted during the strike");
+const kickStart = 0.8 + 50 / 30;
+assert(flowing.advance(kickStart + 0.5).length === 1, "Kick still deals damage at original contact");
+assert(!flowing.releaseRecovery(kickStart + 0.6, true), "Extended kick cannot be canceled early");
+assert(flowing.releaseRecovery(kickStart + 26 / 30, true) === "kickSide" && !flowing.locksMovement,
+  "Moving again at kick retraction avoids waiting for the full 1.27-second clip");
+assert(!flowing.advance(kickStart + 2).length, "Canceled recovery cannot deal late damage");
+const standing = new MeleeSystem();
+standing.request({ kind: "kick", charged: false }, 0);
+standing.startQueued(0, 0, -1, () => true);
+standing.advance(1);
+assert(!standing.releaseRecovery(1, false) && standing.active, "No movement or follow-up: retain full standing animation");
+
 const weapon = new WeaponSystem({ ...DEFAULT_WEAPON, magazineSize: 1, initialReserveAmmo: 3 });
 weapon.update(0, true, false);
 weapon.update(0.1, false, false);

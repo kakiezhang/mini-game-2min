@@ -25,6 +25,7 @@ export type CharacterModelConfig = {
   jogFromWalkRun?: boolean;
   runShootFromRun?: boolean;
   runSpeedThreshold?: number;
+  movingUpperBodyActions?: CharacterOneShotState[];
   heldWeapon?: "smg";
   clips: Partial<Record<CharacterAnimationState, string | RegExp>>;
 };

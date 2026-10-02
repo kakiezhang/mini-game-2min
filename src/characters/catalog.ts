@@ -6,6 +6,7 @@ export const CHARACTER_MODELS = {
     url: new URL("../../ksman_v3_unarmed_moves_review_1k_meshopt.glb", import.meta.url).href,
     height: 118,
     runSpeedThreshold: 1.4,
+    movingUpperBodyActions: ["punchJab", "punchCombo", "punchHook"],
     clips: {
       idle: /^Idle$/i,
       walk: /^Walk$/i,

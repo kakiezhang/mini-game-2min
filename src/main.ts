@@ -1128,6 +1128,7 @@ class OfficeEscapeGame {
       button.classList.toggle("is-charged", charge >= 1);
     }
     this.updateTimeline();
+    if (!this.isArmed) this.updateUnarmedAttack(input);
     this.updatePlayer(delta, input);
     this.updateBulletVisuals(delta);
     const enemiesStartedAt = this.performanceMonitor.startPhase();
@@ -1160,7 +1161,7 @@ class OfficeEscapeGame {
     this.moveSpeedMultiplier = targetMultiplier <= 1
       ? targetMultiplier || 1
       : THREE.MathUtils.lerp(this.moveSpeedMultiplier, targetMultiplier, 1 - Math.exp(-delta * 10));
-    const speed = this.melee.active ? 0 : this.playerState.speed * slowMultiplier * this.moveSpeedMultiplier;
+    const speed = this.melee.locksMovement ? 0 : this.playerState.speed * slowMultiplier * this.moveSpeedMultiplier;
     const nextPosition = this.navigation.moveCircle(
       this.playerState.x,
       this.playerState.z,
@@ -1210,7 +1211,7 @@ class OfficeEscapeGame {
 
   private updatePlayerAnimation(delta: number, input: InputState) {
     if (!this.playerVisual) return;
-    this.playerVisual.setMovement(this.melee.active ? 0 : input.moveX, this.melee.active ? 0 : input.moveZ);
+    this.playerVisual.setMovement(input.moveX, input.moveZ);
     this.playerVisual.setMovementSpeedScale(this.moveSpeedMultiplier * (this.elapsed < this.slowUntil ? 0.7 : 1));
     this.playerVisual.update(delta);
   }
@@ -1528,7 +1529,6 @@ class OfficeEscapeGame {
 
   private updateWeapon(input: InputState) {
     if (!this.isArmed) {
-      this.updateUnarmedAttack(input);
       return undefined;
     }
     const update = this.weapon.update(this.elapsed, input.fireHeld, false);
@@ -1560,8 +1560,16 @@ class OfficeEscapeGame {
   }
 
   private updateUnarmedAttack(input: InputState) {
+    // Establish current movement before selecting full-body vs moving punches.
+    this.playerVisual?.setMovement(input.moveX, input.moveZ);
+    if (this.melee.active?.move.kind === "punch") {
+      this.melee.active.aimX = input.aimX;
+      this.melee.active.aimZ = input.aimZ;
+    }
     for (const hit of this.melee.advance(this.elapsed)) this.resolveUnarmedAttack(hit);
     for (const request of input.meleeRequests) this.melee.request(request, this.elapsed);
+    const recovered = this.melee.releaseRecovery(this.elapsed, Math.hypot(input.moveX, input.moveZ) > 0.08);
+    if (recovered) this.playerVisual?.stopOneShot(recovered);
     this.melee.startQueued(this.elapsed, input.aimX, input.aimZ,
       move => this.playerVisual?.playOneShot(move.action, { durationSeconds: move.duration }) ?? false);
   }
