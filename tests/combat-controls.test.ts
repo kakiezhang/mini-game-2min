@@ -54,6 +54,7 @@ const run = (kind: "punch" | "kick", charged: boolean, expected: MeleeAction) =>
   now += move.duration + 0.1;
 };
 run("punch", false, "punchJab");
+run("punch", false, "punchRightCross");
 run("punch", false, "punchCombo");
 run("punch", true, "punchHook");
 run("punch", false, "punchJab");
@@ -76,7 +77,7 @@ assert(!melee.advance(now + 3).length, "Switching equipment cancels remaining me
 
 // A moving punch releases the legs immediately; kicks release only after contact
 // and retraction. A buffered follow-up must never cut off combo hit markers.
-const flowing = new MeleeSystem();
+const flowing = new MeleeSystem({ cycle: ["punchJab", "punchCombo"], charged: "punchHook" });
 flowing.request({ kind: "punch", charged: false }, 0);
 flowing.startQueued(0, 0, -1, () => true);
 assert(!flowing.locksMovement, "Punching must allow movement from the first frame");

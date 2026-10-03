@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": false, "outDir": ".combat-test-dist", "rootDir": "." },
+  "include": ["tests/melee-wave.test.ts"]
+}

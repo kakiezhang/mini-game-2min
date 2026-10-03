@@ -431,7 +431,9 @@ const installModel = (gltf: GLTF, name: string) => {
   playToggle.disabled = !hasAnimation;
   timeline.disabled = !hasAnimation;
   if (hasAnimation) {
-    const preferredClip = name === REVIEW_MODEL_NAME ? "PunchJab" : "RifleIdle";
+    const requestedClip = new URLSearchParams(location.search).get("clip");
+    const preferredClip = requestedClip && gltf.animations.some(clip => clip.name === requestedClip)
+      ? requestedClip : name === REVIEW_MODEL_NAME ? "PunchJab" : "RifleIdle";
     const defaultClipIndex = gltf.animations.findIndex(clip => clip.name.toLowerCase() === preferredClip.toLowerCase());
     animationSelect.value = String(Math.max(defaultClipIndex, 0));
     chooseAnimation(Math.max(defaultClipIndex, 0));

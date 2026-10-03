@@ -868,6 +868,8 @@ canvas {
 .melee-button.is-charged { color: #ffe09a; box-shadow: 0 0 18px #e9bd5470; }
 .melee-button.is-active { background: linear-gradient(#365246, #365246) padding-box,
   conic-gradient(#ffd166 var(--charge), #adcdb8 var(--charge)) border-box; }
+.melee-button svg { transform: translate(var(--aim-x, 0px), var(--aim-y, 0px)); }
+.melee-button.is-canceling { color: #ff9696; border-color: #ff7373; }
 .combat-controls button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
 
 .float-text {

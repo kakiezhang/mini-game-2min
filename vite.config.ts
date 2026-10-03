@@ -93,6 +93,7 @@ export default defineConfig({
       input: {
         game: path.resolve(import.meta.dirname, "index.html"),
         characterPreview: path.resolve(import.meta.dirname, "character-preview.html"),
+        combatPreview: path.resolve(import.meta.dirname, "combat-preview.html"),
       },
     },
   },

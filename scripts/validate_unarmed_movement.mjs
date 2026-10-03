@@ -20,11 +20,11 @@ for (const key of ['extensionsUsed', 'extensionsRequired']) {
 }
 const asset = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(JSON.stringify(json), '');
 const clips = {
-  idle: 'Idle', walk: 'Walk', run: 'UnarmedRun', punchJab: 'PunchJab',
+  idle: 'Idle', walk: 'Walk', run: 'UnarmedRun', punchJab: 'PunchJab', punchRightCross: 'PunchRightCross',
   punchCombo: 'PunchFourCombo', punchHook: 'PunchHook', kickSide: 'KickSide',
   kickLow: 'KickLow', kickRoundhouse: 'KickRoundhouse', kickHurricane: 'KickHurricane',
 };
-const punches = ['punchJab', 'punchCombo', 'punchHook'];
+const punches = ['punchJab', 'punchRightCross', 'punchCombo', 'punchHook'];
 const create = (layered = true, onlyGait = false) => {
   const root = clone(asset.scene);
   const controller = new CharacterAnimationController(root, asset.animations, {

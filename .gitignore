@@ -5,6 +5,7 @@ dist/
 .ai-test-dist/
 .animation-test-dist/
 .supply-test-dist/
+.combat-test-dist/
 .DS_Store
 *.log
 *.png

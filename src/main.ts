@@ -40,7 +40,11 @@ import { EnemySpawnEffectSystem } from "./effects/enemy-spawn-effect";
 import { ELEVATOR_FRAME_LAYOUT, type ElevatorBoxLayout } from "./elevator-layout";
 import { chooseSupplyKind, pickSupplyPosition, type SupplyKind } from "./supplies";
 import { AttackLoadout, ATTACK_MODE_LABELS, type AttackMode } from "./attack-modes";
-import { MeleeSystem, type ActiveMelee } from "./melee";
+import { MeleeSystem, PUNCH_PLAYBACK_RATES, type ActiveMelee } from "./melee";
+import { MeleeWaveSystem, type WaveTarget } from "./melee-wave";
+import { MeleeWaveVisuals } from "./melee-wave-visual";
+import { JAB_WAVE, type GroundPoint } from "./attack-shape";
+import { AttackPreview } from "./ui/attack-preview";
 import { COMBAT_ICONS } from "./ui/combat-icons";
 
 type Enemy = {
@@ -158,7 +162,10 @@ class OfficeEscapeGame {
   private impactDecals: THREE.Mesh[] = [];
   private supplies: SupplyPickup[] = [];
   private readonly loadout = new AttackLoadout();
-  private readonly melee = new MeleeSystem();
+  private readonly melee = new MeleeSystem(undefined, PUNCH_PLAYBACK_RATES);
+  private readonly meleeWaves = new MeleeWaveSystem(this.navigation);
+  private readonly meleeWaveVisuals = new MeleeWaveVisuals(this.scene);
+  private readonly attackPreview = new AttackPreview(this.scene, this.navigation);
   private get hasSmg() { return this.loadout.has("smg"); }
   private get isArmed() { return this.loadout.current === "smg"; }
   private nextSupplyAt: number = SUPPLY_CONFIG.respawnInterval;
@@ -245,7 +252,8 @@ class OfficeEscapeGame {
     }, {
       fire: this.hud.fireButton, punch: this.hud.punchButton, kick: this.hud.kickButton,
       previous: this.hud.previousMode, next: this.hud.nextMode,
-    });
+    }, { directionalMelee: true });
+    this.attackPreview.hide();
     this.refreshAttackControls();
     this.bindEvents();
     this.showHint("正在加载角色模型…");
@@ -1113,6 +1121,8 @@ class OfficeEscapeGame {
       return;
     }
 
+    const frameStart = this.elapsed;
+    const playerBefore = { x: this.playerState.x, z: this.playerState.z };
     this.elapsed += delta;
     this.enemySpawnEffects.update(delta);
     this.spawnTimer -= delta;
@@ -1126,16 +1136,26 @@ class OfficeEscapeGame {
     for (const [button, charge] of [[this.hud.punchButton, input.punchCharge], [this.hud.kickButton, input.kickCharge]] as const) {
       button.style.setProperty("--charge", `${charge * 360}deg`);
       button.classList.toggle("is-charged", charge >= 1);
+      button.querySelector("span")!.textContent = button.classList.contains("is-canceling") ? "松手取消"
+        : button === this.hud.punchButton ? charge >= 1 ? "勾拳" : "出拳" : charge >= 1 ? "旋风踢" : "踢腿";
     }
     this.updateTimeline();
-    if (!this.isArmed) this.updateUnarmedAttack(input);
+    if (!this.isArmed) this.updateUnarmedAttack(input, frameStart);
     this.updatePlayer(delta, input);
     this.updateBulletVisuals(delta);
+    const waveTargets: WaveTarget[] = this.enemies.map(enemy => ({ id: enemy.id,
+      previous: { x: enemy.group.position.x, z: enemy.group.position.z },
+      position: { x: enemy.group.position.x, z: enemy.group.position.z },
+      radius: enemy.radius, alive: enemy.hp > 0, spawning: enemy.ai.state === "spawning" }));
     const enemiesStartedAt = this.performanceMonitor.startPhase();
     this.updateEnemies(delta);
     this.performanceMonitor.finishPhase("enemies", enemiesStartedAt);
     const shotAim = this.updateWeapon(input);
     this.updatePlayerAnimation(delta, input);
+    this.updateMeleeWaves(frameStart, playerBefore, waveTargets);
+    if (!this.isArmed && input.aimPreview?.kind === "punch") {
+      this.attackPreview.update(this.playerState, input.aimPreview, JAB_WAVE, input.aimPreview.canceled);
+    } else this.attackPreview.hide();
     if (shotAim) this.fireWeapon(shotAim.x, shotAim.z);
     this.updateSupplies(delta);
     this.updateAccessCard();
@@ -1176,13 +1196,20 @@ class OfficeEscapeGame {
     // a direction change before the firing frame cannot turn the gun away
     // from the shot that is already queued.
     const meleeAim = this.melee.active;
-    const facingAim = this.pendingShotAim ?? (meleeAim ? { x: meleeAim.aimX, z: meleeAim.aimZ } : { x: input.aimX, z: input.aimZ });
+    const moving = Math.hypot(input.moveX, input.moveZ) > 0.08;
+    const facingAim = this.pendingShotAim ?? (meleeAim ? { x: meleeAim.aimX, z: meleeAim.aimZ }
+      : !this.isArmed && input.aimPreview && !input.aimPreview.canceled ? input.aimPreview
+      : !this.isArmed && moving ? { x: input.moveX, z: input.moveZ }
+      : !this.isArmed ? { x: Math.sin(this.player.rotation.y), z: Math.cos(this.player.rotation.y) }
+      : { x: input.aimX, z: input.aimZ });
     this.player.rotation.y = Math.atan2(facingAim.x, facingAim.z);
     this.playerLight?.position.set(this.playerState.x, 72, this.playerState.z);
   }
 
   private updateCrosshair(input: InputState) {
     if (!this.crosshair) return;
+    this.crosshair.visible = this.isArmed;
+    if (!this.isArmed) return;
     if (window.innerHeight <= window.innerWidth || !this.coarsePointer.matches) {
       this.crosshair.position.set(input.aimPointX, 5, input.aimPointZ);
       return;
@@ -1559,22 +1586,55 @@ class OfficeEscapeGame {
     return shotAim;
   }
 
-  private updateUnarmedAttack(input: InputState) {
+  private updateUnarmedAttack(input: InputState, frameStart: number) {
     // Establish current movement before selecting full-body vs moving punches.
     this.playerVisual?.setMovement(input.moveX, input.moveZ);
-    if (this.melee.active?.move.kind === "punch") {
-      this.melee.active.aimX = input.aimX;
-      this.melee.active.aimZ = input.aimZ;
-    }
-    for (const hit of this.melee.advance(this.elapsed)) this.resolveUnarmedAttack(hit);
-    for (const request of input.meleeRequests) this.melee.request(request, this.elapsed);
-    const recovered = this.melee.releaseRecovery(this.elapsed, Math.hypot(input.moveX, input.moveZ) > 0.08);
+    for (const request of input.meleeRequests) this.melee.request(request, frameStart);
+    const recovered = this.melee.releaseRecovery(frameStart, Math.hypot(input.moveX, input.moveZ) > 0.08);
     if (recovered) this.playerVisual?.stopOneShot(recovered);
-    this.melee.startQueued(this.elapsed, input.aimX, input.aimZ,
+    this.melee.startQueued(frameStart, input.aimX, input.aimZ,
       move => this.playerVisual?.playOneShot(move.action, { durationSeconds: move.duration }) ?? false);
   }
 
-  private resolveUnarmedAttack(attack: ActiveMelee) {
+  private updateMeleeWaves(frameStart: number, playerBefore: GroundPoint, targets: WaveTarget[]) {
+    const enemiesById = new Map(this.enemies.map(enemy => [enemy.id, enemy]));
+    for (const target of targets) {
+      const enemy = enemiesById.get(target.id);
+      if (!enemy) { target.alive = false; continue; }
+      target.position = { x: enemy.group.position.x, z: enemy.group.position.z };
+      target.alive = enemy.hp > 0;
+      target.spawning ||= enemy.ai.state === "spawning";
+    }
+    for (const event of this.melee.advanceEvents(this.elapsed)) {
+      if (event.attack.move.kind === "kick") {
+        this.resolveKickAttack(event.attack);
+        continue;
+      }
+      const fraction = THREE.MathUtils.clamp((event.occurredAt - frameStart) / Math.max(1e-9, this.elapsed - frameStart), 0, 1);
+      this.meleeWaves.spawn(event, {
+        x: THREE.MathUtils.lerp(playerBefore.x, this.playerState.x, fraction),
+        z: THREE.MathUtils.lerp(playerBefore.z, this.playerState.z, fraction),
+      }, { ...JAB_WAVE, damage: event.attack.move.damage });
+    }
+    // Released waves finish even after switching to the gun; punches have no direct-hit path.
+    for (const hit of this.meleeWaves.advance(frameStart, this.elapsed, targets)) {
+      const target = enemiesById.get(hit.targetId);
+      if (!target || target.hp <= 0 || target.ai.state === "spawning") continue;
+      this.damageMeleeTarget(target, hit.damage);
+    }
+    this.removeDeadEnemies();
+    this.meleeWaveVisuals.update(this.meleeWaves.waves);
+  }
+
+  private damageMeleeTarget(target: Enemy, damage: number) {
+    target.hp -= damage;
+    target.hitFlashUntil = this.elapsed + 0.14;
+    this.enemyAi.notifyHit(target.ai, this.playerState.x, this.playerState.z, this.elapsed);
+    this.updateEnemyVisualState(target);
+    this.emitParticles(target.group.position.x, 30, target.group.position.z, 0xffd166, 5, 38);
+  }
+
+  private resolveKickAttack(attack: ActiveMelee) {
     const { aimX: forwardX, aimZ: forwardZ, move } = attack;
     const range = move.range;
     const targets = this.enemies
@@ -1605,12 +1665,8 @@ class OfficeEscapeGame {
     this.scene.add(swing);
     this.shotEffects.push({ object: swing, life: 0.13, maxLife: 0.13 });
     for (const target of targets) {
-      target.hp -= move.damage;
       attack.hitTargets.add(target.id);
-      target.hitFlashUntil = this.elapsed + 0.14;
-      this.enemyAi.notifyHit(target.ai, this.playerState.x, this.playerState.z, this.elapsed);
-      this.updateEnemyVisualState(target);
-      this.emitParticles(target.group.position.x, 30, target.group.position.z, 0xffd166, 5, 38);
+      this.damageMeleeTarget(target, move.damage);
     }
     this.removeDeadEnemies();
   }
@@ -1621,6 +1677,7 @@ class OfficeEscapeGame {
     this.weapon.holster();
     this.pendingShotAim = undefined;
     this.melee.cancel();
+    this.attackPreview.hide();
     const oldVisual = this.playerVisual;
     if (oldVisual) {
       oldVisual.dispose();
@@ -1656,7 +1713,7 @@ class OfficeEscapeGame {
     }
     this.hud.controls.textContent = this.isArmed
       ? "WASD / 方向键移动 · J / 左键射击 · 空弹匣自动换弹 · Q / E 切换方式"
-      : "WASD / 方向键移动 · J / 左键出拳 · K 踢腿 · 长按蓄力 · Q / E 切换方式";
+      : "WASD 移动 · 鼠标／拖动按钮瞄准 · J 出拳 · K 踢腿 · 松手攻击 · 长按蓄力 · Q / E 切换";
   }
 
   private updateSupplies(delta: number) {
@@ -2448,6 +2505,13 @@ class OfficeEscapeGame {
     const isLevelEntry = this.gameState === "ready" && nextState === "playing";
     this.gameState = nextState;
     this.input?.resetCombat();
+    if (nextState === "success" || nextState === "failed") {
+      if (this.melee.active) this.playerVisual?.stopOneShot(this.melee.active.move.action);
+      this.melee.cancel();
+      this.meleeWaves.clear();
+      this.meleeWaveVisuals.update([]);
+      this.attackPreview.hide();
+    }
     this.hud.root.dataset.gameState = nextState;
     if (isLevelEntry) this.hud.missionPanel.classList.add("is-intro-visible");
   }
@@ -2918,8 +2982,8 @@ class OfficeEscapeGame {
         </div>
         <div class="combat-actions">
           <button class="fire-button" type="button" aria-label="射击" title="射击" hidden>${COMBAT_ICONS.fire}<span>射击</span></button>
-          <button class="melee-button punch-button" type="button" aria-label="出拳，长按蓄力勾拳" title="出拳 · 长按蓄力">${COMBAT_ICONS.punch}<span>出拳</span></button>
-          <button class="melee-button kick-button" type="button" aria-label="踢腿，长按蓄力旋风踢" title="踢腿 · 长按蓄力">${COMBAT_ICONS.kick}<span>踢腿</span></button>
+          <button class="melee-button punch-button" type="button" aria-label="拖动瞄准，松手出拳，长按蓄力勾拳" title="拖动瞄准 · 松手出拳 · 回中心取消">${COMBAT_ICONS.punch}<span>出拳</span></button>
+          <button class="melee-button kick-button" type="button" aria-label="拖动瞄准，松手踢腿，长按蓄力旋风踢" title="拖动瞄准 · 松手踢腿 · 回中心取消">${COMBAT_ICONS.kick}<span>踢腿</span></button>
         </div>
       </div>
       <div class="controls">WASD / 方向键移动 · J 出拳 · K 踢腿 · Q / E 切换方式</div>
